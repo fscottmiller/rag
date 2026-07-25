@@ -1,1 +1,0 @@
-"""Lightweight RAG MCP service."""

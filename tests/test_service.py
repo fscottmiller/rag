@@ -1,8 +1,8 @@
 import pytest
 
-from lightweight_rag.config import Settings
-from lightweight_rag.service import RAGService
-from lightweight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from utralight_rag.config import Settings
+from utralight_rag.service import RAGService
+from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 def test_document_crud_and_cascade(service):

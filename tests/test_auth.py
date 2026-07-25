@@ -1,7 +1,7 @@
 import pytest
 
-from lightweight_rag.auth import AuthenticationError, AuthorizationError, Authorizer
-from lightweight_rag.config import Settings
+from utralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer
+from utralight_rag.config import Settings
 
 
 def test_no_auth_mode_grants_every_action():

@@ -24,7 +24,7 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
     server = FastMCP(
-        "lightweight-rag",
+        "utralight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
         streamable_http_path=os.getenv("MCP_PATH", "/mcp"),

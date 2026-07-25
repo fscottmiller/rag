@@ -1,6 +1,6 @@
 import pytest
 
-from lightweight_rag.mcp_server.server import create_mcp, get_transport
+from utralight_rag.mcp_server.server import create_mcp, get_transport
 
 
 def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
