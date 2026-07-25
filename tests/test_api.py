@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from transient_rag.api.main import create_app
-from transient_rag.config import Settings
-from transient_rag.service import RAGService
-from transient_rag.storage.sqlite import SQLiteStore
+from lightweight_rag.api.main import create_app
+from lightweight_rag.config import Settings
+from lightweight_rag.service import RAGService
+from lightweight_rag.storage.sqlite import SQLiteStore
 
 
 def test_rest_lifecycle(service):

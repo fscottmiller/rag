@@ -1,22 +1,22 @@
-# Transient RAG MCP server architecture
+# Lightweight RAG MCP server architecture
 
 ## Overview
 
-This project provides a short-lived local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations.
+This project provides a lightweight local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations.
 
 Each service process owns exactly one index and one SQLite database. The default database is in memory; set `RAG_DATABASE_PATH` to use one local SQLite file when a process restart should preserve that index. Independent indexes run as independent service instances rather than as collections inside one process. The design intentionally does not include background jobs, evaluation metrics, synthetic QA generation, or benchmark code.
-REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. This is a deliberate transient-scale ceiling rather than a substitute for a multi-process database layer.
+REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. This is a deliberate lightweight-deployment ceiling rather than a substitute for a multi-process database layer.
 
 
 ## Components
 
-- `src/transient_rag/api`: JSON and multipart REST routes for document CRUD and search.
-- `src/transient_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
-- `src/transient_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
-- `src/transient_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
-- `src/transient_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
+- `src/lightweight_rag/api`: JSON and multipart REST routes for document CRUD and search.
+- `src/lightweight_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
+- `src/lightweight_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
+- `src/lightweight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
+- `src/lightweight_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
 
-The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for its transient scale, but large filtered indexes would need database-side filtering or metadata indexes.
+The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for a lightweight deployment, but large filtered indexes would need database-side filtering or metadata indexes.
 
 ## Architectural decisions
 
@@ -30,7 +30,7 @@ Alternative: older Python versions would increase compatibility burden and are n
 
 SQLite provides zero-service local storage and a single-file deployment option. sqlite-vec adds KNN vector search without an external database or operational infrastructure. Foreign keys and explicit vector-row deletion keep document deletion consistent with the vector index.
 
-Alternative: Milvus, Qdrant, Pinecone, and similar services provide more scale but violate the minimal, transient infrastructure goal.
+Alternative: Milvus, Qdrant, Pinecone, and similar services provide more scale but violate the minimal, lightweight infrastructure goal.
 
 ### ADR-003: Chonkie for chunking
 
@@ -50,15 +50,15 @@ REST and MCP are transport adapters around exactly one `RAGService`. This avoids
 
 Alternative: implementing logic separately in route and tool handlers would be simpler for a prototype but would make fixes inconsistent.
 
-### ADR-006: Transient lifecycle
+### ADR-006: Lightweight storage lifecycle
 
-The default `:memory:` database reflects the primary use case: fast contextual recall for one process. File-backed SQLite is supported as an opt-in convenience, but migrations, replication, retention policies, and long-term storage concerns are intentionally out of scope.
+The default `:memory:` database keeps local setup fast and dependency-free. File-backed SQLite is also supported when an index should survive process restarts or be shared by REST and MCP processes. Migrations, replication, retention policies, and production-scale storage operations are intentionally out of scope.
 
 ### ADR-007: One index per service instance
 
 A service process owns one SQLite index, one embedding configuration, and one chunking configuration. To run independent indexes, deploy independent service instances with separate database paths and ports. This keeps collection routing, mixed embedding spaces, and per-document configuration out of the core service.
 
-This also makes index isolation explicit: one process owns one database file, and an index can be discarded by stopping the instance and removing its transient database. The additional operational cost is limited to process supervision and port/configuration management, which is appropriate for the expected small number of lightweight indexes.
+This also makes index isolation explicit: one process owns one database file, and an index can be removed by stopping the instance and deleting its database file. The additional operational cost is limited to process supervision and port/configuration management, which is appropriate for a small number of lightweight indexes.
 
 Alternative: collections inside one process would reduce the number of processes but would require collection-aware API and MCP contracts, routing, authorization, and configuration validation. That complexity is deferred unless the number of indexes makes process-per-index management impractical.
 
@@ -82,13 +82,13 @@ uv sync
 uv sync --extra local-embeddings
 
 # Terminal 1: one instance owns one index.
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn transient_rag.api.main:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn lightweight_rag.api.main:app --port 8001
 # Terminal 2:
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn transient_rag.api.main:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn lightweight_rag.api.main:app --port 8002
 
-uv run python -m transient_rag.mcp_server.server
+uv run python -m lightweight_rag.mcp_server.server
 MCP_TRANSPORT=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp \
-  uv run python -m transient_rag.mcp_server.server
+  uv run python -m lightweight_rag.mcp_server.server
 uv run pytest
 ```
 

@@ -1,7 +1,7 @@
 import pytest
 
-from transient_rag.auth import AuthenticationError, AuthorizationError, Authorizer
-from transient_rag.config import Settings
+from lightweight_rag.auth import AuthenticationError, AuthorizationError, Authorizer
+from lightweight_rag.config import Settings
 
 
 def test_no_auth_mode_grants_every_action():

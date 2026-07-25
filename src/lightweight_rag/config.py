@@ -1,4 +1,4 @@
-"""Environment-backed configuration for the transient RAG service."""
+"""Environment-backed configuration for the lightweight RAG service."""
 
 import os
 from dataclasses import dataclass, field

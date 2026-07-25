@@ -1,8 +1,8 @@
 import pytest
 
-from transient_rag.config import Settings
-from transient_rag.service import RAGService
-from transient_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from lightweight_rag.config import Settings
+from lightweight_rag.service import RAGService
+from lightweight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 def test_document_crud_and_cascade(service):

@@ -24,7 +24,7 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
     server = FastMCP(
-        "transient-rag",
+        "lightweight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
         streamable_http_path=os.getenv("MCP_PATH", "/mcp"),
@@ -52,7 +52,7 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
 
     @server.tool()
     def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
-        """List documents currently held in the transient index."""
+        """List documents currently held in the index."""
         authorize(ctx, "read")
         return rag.list_documents()
 
@@ -70,7 +70,7 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
         *,
         ctx: Context,
     ) -> dict[str, Any]:
-        """Ingest a document directly into the temporary index."""
+        """Ingest a document directly into the index."""
         authorize(ctx, "write")
         return rag.ingest(title, content, metadata)
 

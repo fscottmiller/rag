@@ -1,6 +1,6 @@
 import pytest
 
-from transient_rag.pipeline.chunking import ChonkieChunker
+from lightweight_rag.pipeline.chunking import ChonkieChunker
 
 
 def test_chonkie_strategies_return_text_chunks():

@@ -1,9 +1,9 @@
 import pytest
 
-from transient_rag.pipeline.chunking import BaseChunker
-from transient_rag.pipeline.embeddings import BaseEmbedder
-from transient_rag.service import RAGService
-from transient_rag.storage.sqlite import SQLiteStore
+from lightweight_rag.pipeline.chunking import BaseChunker
+from lightweight_rag.pipeline.embeddings import BaseEmbedder
+from lightweight_rag.service import RAGService
+from lightweight_rag.storage.sqlite import SQLiteStore
 
 
 class KeywordEmbedder(BaseEmbedder):

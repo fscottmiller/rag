@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from transient_rag.pipeline.embeddings import (
+from lightweight_rag.pipeline.embeddings import (
     BaseEmbedder,
     OpenAICompatibleEmbedder,
     SentenceTransformerEmbedder,
