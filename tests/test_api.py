@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
 
-from src.api.main import create_app
+from transient_rag.api.main import create_app
+from transient_rag.config import Settings
+from transient_rag.service import RAGService
+from transient_rag.storage.sqlite import SQLiteStore
 
 
 def test_rest_lifecycle(service):
@@ -106,3 +109,54 @@ def test_rest_form_content_and_service_validation_errors(service):
         json={"title": " ", "content": "replacement"},
     )
     assert empty_update.status_code == 400
+
+
+def test_trusted_proxy_roles_control_document_mutations(service):
+    protected_service = RAGService(
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(auth_mode="trusted-proxy"),
+    )
+    client = TestClient(create_app(protected_service))
+    reader_headers = {
+        "Cf-Access-Authenticated-User-Email": "reader@example.test",
+        "X-Auth-Request-Role": "reader",
+    }
+    admin_headers = {
+        "Cf-Access-Authenticated-User-Email": "admin@example.test",
+        "X-Auth-Request-Role": "admin",
+    }
+
+    assert client.get("/documents").status_code == 401
+    assert client.get("/documents", headers=reader_headers).status_code == 200
+    assert (
+        client.post(
+            "/documents",
+            json={"title": "Reader", "content": "content"},
+            headers=reader_headers,
+        ).status_code
+        == 403
+    )
+
+    created = client.post(
+        "/documents",
+        json={"title": "Admin", "content": "content"},
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    document_id = created.json()["id"]
+    assert client.get(f"/documents/{document_id}", headers=reader_headers).status_code == 200
+    assert (
+        client.post("/search", json={"query": "content"}, headers=reader_headers).status_code == 200
+    )
+    assert (
+        client.put(
+            f"/documents/{document_id}",
+            json={"title": "Changed", "content": "content"},
+            headers=reader_headers,
+        ).status_code
+        == 403
+    )
+    assert client.delete(f"/documents/{document_id}", headers=reader_headers).status_code == 403
+    assert client.delete(f"/documents/{document_id}", headers=admin_headers).status_code == 204

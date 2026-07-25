@@ -5,11 +5,24 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from functools import wraps
+from typing import Any, Callable, Iterable, TypeVar
 
 import sqlite_vec
+
+T = TypeVar("T")
+
+
+def _synchronized(method: Callable[..., T]) -> Callable[..., T]:
+    @wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> T:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class DocumentNotFoundError(KeyError):
@@ -18,6 +31,7 @@ class DocumentNotFoundError(KeyError):
 
 class SQLiteStore:
     def __init__(self, database_path: str = ":memory:") -> None:
+        self._lock = threading.RLock()
         self.connection = sqlite3.connect(database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.connection.enable_load_extension(True)
@@ -67,7 +81,8 @@ class SQLiteStore:
             raise ValueError("All embeddings in one index must have the same dimension")
         self.connection.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
-            f"USING vec0(chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{dimension}])"
+            f"USING vec0(chunk_id INTEGER PRIMARY KEY, "
+            f"embedding FLOAT[{dimension}] distance_metric=cosine)"
         )
         self._vector_dimension = dimension
         self.connection.commit()
@@ -93,6 +108,7 @@ class SQLiteStore:
             if dimension == 0 or any(len(vector) != dimension for vector in embeddings):
                 raise ValueError("All embeddings must have the same non-zero dimension")
 
+    @_synchronized
     def create_document(
         self,
         title: str,
@@ -126,6 +142,7 @@ class SQLiteStore:
                 )
         return self.get_document(document_id)
 
+    @_synchronized
     def list_documents(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """SELECT d.*, COUNT(c.id) AS chunk_count FROM documents d
@@ -134,6 +151,7 @@ class SQLiteStore:
         ).fetchall()
         return [self._document_summary(row) for row in rows]
 
+    @_synchronized
     def get_document(self, document_id: str) -> dict[str, Any]:
         row = self.connection.execute(
             "SELECT * FROM documents WHERE id = ?", (document_id,)
@@ -175,6 +193,7 @@ class SQLiteStore:
     def _chunk_count_all(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
+    @_synchronized
     def replace_document(
         self,
         document_id: str,
@@ -222,6 +241,7 @@ class SQLiteStore:
                 )
         return self.get_document(document_id)
 
+    @_synchronized
     def delete_document(self, document_id: str) -> None:
         if (
             self.connection.execute(
@@ -243,6 +263,7 @@ class SQLiteStore:
                 )
             self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
 
+    @_synchronized
     def search(
         self, vector: list[float], top_k: int, filter_metadata: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
@@ -251,6 +272,7 @@ class SQLiteStore:
         if len(vector) != self._vector_dimension:
             raise ValueError("Search embedding dimension does not match indexed embeddings")
         if filter_metadata:
+            # Metadata filtering happens after the KNN query, which is adequate at transient scale.
             candidate_count = max(1, self._chunk_count_all())
         else:
             candidate_count = max(top_k * 10, 50)
@@ -276,12 +298,13 @@ class SQLiteStore:
                     "title": row["title"],
                     "text": row["text"],
                     "metadata": metadata,
-                    "score": 1.0 - row["distance"],
+                    "score": 0.0 if row["distance"] is None else 1.0 - row["distance"],
                 }
             )
             if len(result) >= top_k:
                 break
         return result
 
+    @_synchronized
     def close(self) -> None:
         self.connection.close()

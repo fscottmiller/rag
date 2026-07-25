@@ -1,6 +1,16 @@
 import pytest
 
-from src.mcp_server.server import create_mcp
+from transient_rag.mcp_server.server import create_mcp, get_transport
+
+
+def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
+    monkeypatch.delenv("MCP_TRANSPORT", raising=False)
+    assert get_transport() == "stdio"
+    monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+    assert get_transport() == "streamable-http"
+    monkeypatch.setenv("MCP_TRANSPORT", "sse")
+    with pytest.raises(ValueError, match="stdio.*streamable-http"):
+        get_transport()
 
 
 @pytest.mark.asyncio
@@ -14,6 +24,7 @@ async def test_mcp_tools_share_service_lifecycle(service):
         "upload_document",
         "delete_document",
     }
+    assert all("ctx" not in tool.inputSchema.get("properties", {}) for tool in tools)
 
     _, created = await server.call_tool(
         "upload_document",

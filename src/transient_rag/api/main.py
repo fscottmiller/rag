@@ -7,8 +7,10 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
+from ..auth import AuthenticationError, AuthorizationError, Authorizer
 from ..service import RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
@@ -16,33 +18,48 @@ from .models import DocumentPayload, SearchPayload
 
 def create_app(service: RAGService | None = None) -> FastAPI:
     rag = service or RAGService()
+    authorizer = Authorizer(rag.settings)
     app = FastAPI(title="Transient RAG MCP", version="0.1.0")
     app.state.rag = rag
 
+    def require(request: Request, action: str) -> None:
+        try:
+            authorizer.authorize(request.headers, action)
+        except AuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except AuthorizationError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     @app.post("/documents", status_code=201)
     async def create_document(request: Request) -> dict[str, Any]:
+        require(request, "write")
         try:
             payload = await _read_document_request(request)
         except (ValidationError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            return rag.ingest(**payload)
+            return await run_in_threadpool(rag.ingest, **payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/documents")
-    async def list_documents() -> list[dict[str, Any]]:
+    def list_documents(request: Request) -> list[dict[str, Any]]:
+        require(request, "read")
         return rag.list_documents()
 
     @app.get("/documents/{document_id}")
-    async def get_document(document_id: str) -> dict[str, Any]:
+    def get_document(request: Request, document_id: str) -> dict[str, Any]:
+        require(request, "read")
         try:
             return rag.get_document(document_id)
         except DocumentNotFoundError:
             raise HTTPException(status_code=404, detail="Document not found")
 
     @app.put("/documents/{document_id}")
-    async def update_document(document_id: str, payload: DocumentPayload) -> dict[str, Any]:
+    def update_document(
+        request: Request, document_id: str, payload: DocumentPayload
+    ) -> dict[str, Any]:
+        require(request, "write")
         try:
             return rag.update(document_id, **payload.model_dump())
         except DocumentNotFoundError:
@@ -51,14 +68,16 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.delete("/documents/{document_id}", status_code=204)
-    async def delete_document(document_id: str) -> None:
+    def delete_document(request: Request, document_id: str) -> None:
+        require(request, "write")
         try:
             rag.delete_document(document_id)
         except DocumentNotFoundError:
             raise HTTPException(status_code=404, detail="Document not found")
 
     @app.post("/search")
-    async def search(payload: SearchPayload) -> list[dict[str, Any]]:
+    def search(request: Request, payload: SearchPayload) -> list[dict[str, Any]]:
+        require(request, "read")
         try:
             return rag.search(payload.query, payload.top_k, payload.filter_metadata)
         except ValueError as exc:

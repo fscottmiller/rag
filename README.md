@@ -9,20 +9,27 @@ The default database is in memory. Data is intentionally temporary.
 ```bash
 uv sync
 uv sync --extra local-embeddings
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn transient_rag.api.main:app --reload
 ```
 
-The second command installs the default Sentence Transformers provider. For an OpenAI-compatible embedding API, configure the endpoint, model, and credentials in the environment:
+The second command installs the default Sentence Transformers provider. For any OpenAI-compatible embedding API, configure the endpoint, model, and optional credentials in the environment:
 
 ```bash
 RAG_EMBEDDING_PROVIDER=openai-compatible \
 RAG_EMBEDDING_URL=https://api.openai.com/v1/embeddings \
 RAG_EMBEDDING_MODEL=text-embedding-3-small \
 RAG_EMBEDDING_API_KEY="$OPENAI_API_KEY" \
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn transient_rag.api.main:app --reload
 ```
 
-Ollama remains available as an optional provider for deployments that already run it locally.
+Ollama uses the same OpenAI-compatible protocol and settings; there are no separate Ollama variables:
+
+```bash
+RAG_EMBEDDING_PROVIDER=ollama \
+RAG_EMBEDDING_URL=http://localhost:11434/v1/embeddings \
+RAG_EMBEDDING_MODEL=nomic-embed-text \
+uv run uvicorn transient_rag.api.main:app --reload
+```
 
 Open the interactive API documentation at <http://127.0.0.1:8000/docs>.
 
@@ -31,8 +38,8 @@ Open the interactive API documentation at <http://127.0.0.1:8000/docs>.
 Each running service instance owns one index, one SQLite database, and one embedding/chunking configuration. Run separate instances for independent indexes rather than configuring collections inside one process:
 
 ```bash
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn src.api.main:app --port 8001
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn src.api.main:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn transient_rag.api.main:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn transient_rag.api.main:app --port 8002
 ```
 
 Use a separate database path and port for every instance. This keeps vector spaces, chunking behavior, and lifecycle management isolated.
@@ -66,21 +73,42 @@ Available endpoints:
 
 ## MCP
 
-Run the MCP server over stdio:
+Run the MCP server over stdio (the default):
 
 ```bash
-uv run python -m src.mcp_server.server
+uv run python -m transient_rag.mcp_server.server
 ```
 
-Use SSE instead:
+Use streamable HTTP when an MCP client or proxy needs an HTTP endpoint:
 
 ```bash
-MCP_TRANSPORT=sse uv run python -m src.mcp_server.server
+MCP_TRANSPORT=streamable-http \
+MCP_HOST=127.0.0.1 \
+MCP_PORT=8000 \
+MCP_PATH=/mcp \
+uv run python -m transient_rag.mcp_server.server
 ```
 
 Available tools: `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
 
 When REST and MCP run as separate processes, set the same file-backed `RAG_DATABASE_PATH` for both if they should share an index. With the default `:memory:` database, each process has its own transient index.
+
+## Authentication and authorization
+
+The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and every caller can read, search, upload, update, and delete documents. Use this only on a trusted local network.
+
+For a deployment behind an authenticating reverse proxy or Cloudflare Access tunnel, set `RAG_AUTH_MODE=trusted-proxy`. The application trusts the proxy to authenticate the request and to overwrite the configured identity and role headers:
+
+```bash
+RAG_AUTH_MODE=trusted-proxy \
+RAG_PROXY_USER_HEADER=Cf-Access-Authenticated-User-Email \
+RAG_PROXY_ROLE_HEADER=X-Auth-Request-Role \
+RAG_PROXY_ADMIN_ROLE=admin \
+RAG_PROXY_READER_ROLE=reader \
+uv run uvicorn transient_rag.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.
 
 ## Configuration
 
@@ -92,16 +120,23 @@ These variables define the configuration of the current index, not per-document 
 | --- | --- | --- |
 | `RAG_DATABASE_PATH` | `:memory:` | Use a SQLite file instead of memory. |
 | `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` | Select `sentence-transformers`, `openai-compatible`, or `ollama`. |
-| `RAG_EMBEDDING_MODEL` | provider-dependent | Embedding model name sent to the configured provider. |
-| `RAG_EMBEDDING_URL` | `https://api.openai.com/v1/embeddings` | OpenAI-compatible embeddings endpoint. |
+| `RAG_EMBEDDING_MODEL` | provider-dependent | Embedding model name sent to the configured provider. Ollama defaults to `nomic-embed-text`. |
+| `RAG_EMBEDDING_URL` | provider-dependent | OpenAI-compatible embeddings endpoint. Ollama defaults to `http://localhost:11434/v1/embeddings`. |
 | `RAG_EMBEDDING_API_KEY` | `OPENAI_API_KEY` fallback | Optional Bearer token for the embeddings endpoint. |
 | `RAG_EMBEDDING_TIMEOUT` | `60` | Embedding request timeout in seconds. |
 | `RAG_EMBEDDING_DIMENSIONS` | unset | Optional output dimension sent to compatible providers. |
-| `RAG_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL. |
-| `RAG_OLLAMA_MODEL` | `nomic-embed-text` | Ollama embedding model. |
 | `RAG_CHUNKER` | `recursive` | Select `recursive`, `sentence`, or `token`. |
 | `RAG_CHUNK_SIZE` | `512` | Target chunk size. |
 | `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks. |
+| `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. |
+| `MCP_HOST` | `127.0.0.1` | Bind host for streamable HTTP. |
+| `MCP_PORT` | `8000` | Bind port for streamable HTTP. |
+| `MCP_PATH` | `/mcp` | Streamable HTTP path. |
+| `RAG_AUTH_MODE` | `none` | Select `none` or `trusted-proxy`. |
+| `RAG_PROXY_USER_HEADER` | `Cf-Access-Authenticated-User-Email` | Trusted proxy header containing the authenticated identity. |
+| `RAG_PROXY_ROLE_HEADER` | `X-Auth-Request-Role` | Trusted proxy header containing `admin` or `reader`. |
+| `RAG_PROXY_ADMIN_ROLE` | `admin` | Value in the role header that grants full access. |
+| `RAG_PROXY_READER_ROLE` | `reader` | Value in the role header that grants read/search access. |
 
 Run the automated tests with coverage enforcement:
 

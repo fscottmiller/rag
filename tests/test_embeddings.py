@@ -4,9 +4,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from src.pipeline.embeddings import (
+from transient_rag.pipeline.embeddings import (
     BaseEmbedder,
-    OllamaEmbedder,
     OpenAICompatibleEmbedder,
     SentenceTransformerEmbedder,
     create_embedder,
@@ -26,9 +25,11 @@ def test_embedder_factory_supports_provider_aliases():
     assert isinstance(
         create_embedder("sentence_transformers", "model", "url"), SentenceTransformerEmbedder
     )
-    assert isinstance(create_embedder("ollama", "model", "url/"), OllamaEmbedder)
+    ollama_embedder = create_embedder("ollama", "model", "http://ollama/v1/embeddings")
+    assert isinstance(ollama_embedder, OpenAICompatibleEmbedder)
+    assert ollama_embedder.url == "http://ollama/v1/embeddings"
     openai_embedder = create_embedder(
-        "openai_compatible", "model", "url", "http://embedding.test/v1/embeddings", "secret", 5, 768
+        "openai_compatible", "model", "http://embedding.test/v1/embeddings", "secret", 5, 768
     )
     assert isinstance(openai_embedder, OpenAICompatibleEmbedder)
     assert openai_embedder.url == "http://embedding.test/v1/embeddings"
@@ -37,39 +38,19 @@ def test_embedder_factory_supports_provider_aliases():
         create_embedder("unknown", "model", "url")
 
 
-def test_ollama_embedder_uses_local_embeddings_endpoint():
-    requests = []
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            length = int(self.headers["Content-Length"])
-            payload = json.loads(self.rfile.read(length))
-            requests.append((self.path, payload))
-            body = json.dumps({"embedding": [0.25, 0.75]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *_args):
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        embedder = OllamaEmbedder("nomic-test", f"http://127.0.0.1:{server.server_port}/")
-        assert embedder.embed(["one", "two"]) == [[0.25, 0.75], [0.25, 0.75]]
-    finally:
-        server.shutdown()
-        thread.join()
-        server.server_close()
-
-    assert requests == [
-        ("/api/embeddings", {"model": "nomic-test", "prompt": "one"}),
-        ("/api/embeddings", {"model": "nomic-test", "prompt": "two"}),
-    ]
+def test_ollama_uses_openai_compatible_embeddings_endpoint():
+    embedder = create_embedder(
+        "ollama",
+        "nomic-test",
+        "http://ollama:11434/v1/embeddings",
+        "",
+        12,
+        None,
+    )
+    assert isinstance(embedder, OpenAICompatibleEmbedder)
+    assert embedder.url == "http://ollama:11434/v1/embeddings"
+    assert embedder.api_key == ""
+    assert embedder.timeout == 12
 
 
 def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
