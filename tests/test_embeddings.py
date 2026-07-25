@@ -71,6 +71,39 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
                 body = json.dumps({"data": []}).encode()
             elif self.path == "/invalid-embedding":
                 body = json.dumps({"data": [{"index": 0, "embedding": "invalid"}]}).encode()
+            elif self.path == "/duplicate-index":
+                body = json.dumps(
+                    {
+                        "data": [
+                            {"index": 0, "embedding": [0, 1]},
+                            {"index": 0, "embedding": [2, 3]},
+                        ]
+                    }
+                ).encode()
+            elif self.path == "/missing-index":
+                body = json.dumps(
+                    {
+                        "data": [
+                            {"index": 0, "embedding": [0, 1]},
+                            {"index": 2, "embedding": [2, 3]},
+                        ]
+                    }
+                ).encode()
+            elif self.path == "/nonfinite":
+                body = json.dumps({"data": [{"index": 0, "embedding": ["NaN"]}]}).encode()
+            elif self.path == "/non-dict":
+                body = json.dumps({"data": [None]}).encode()
+            elif self.path == "/bad-index":
+                body = json.dumps({"data": [{"index": "0", "embedding": [0, 1]}]}).encode()
+            elif self.path == "/batch":
+                body = json.dumps(
+                    {
+                        "data": [
+                            {"index": index, "embedding": [float(index), 1.0]}
+                            for index in range(len(payload["input"]))
+                        ]
+                    }
+                ).encode()
             else:
                 body = json.dumps(
                     {
@@ -102,7 +135,12 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
             dimensions=2,
         )
         assert embedder.embed(["first", "second"]) == [[0.0, 1.0], [2.0, 3.0]]
+        first_request = requests[0]
         assert embedder.embed([]) == []
+        requests.clear()
+        batched = OpenAICompatibleEmbedder("model", f"{base_url}/batch", batch_size=1)
+        assert batched.embed(["first", "second"]) == [[0.0, 1.0], [0.0, 1.0]]
+        assert len(requests) == 2
         with pytest.raises(RuntimeError, match="unexpected data count"):
             OpenAICompatibleEmbedder("model", f"{base_url}/bad").embed(["one"])
         with pytest.raises(RuntimeError, match="HTTP 503"):
@@ -111,12 +149,17 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
             OpenAICompatibleEmbedder("model", f"{base_url}/invalid-json").embed(["one"])
         with pytest.raises(RuntimeError, match="invalid embeddings"):
             OpenAICompatibleEmbedder("model", f"{base_url}/invalid-embedding").embed(["one"])
+        for path in ("duplicate-index", "missing-index", "nonfinite", "non-dict", "bad-index"):
+            with pytest.raises(RuntimeError, match="invalid embeddings"):
+                OpenAICompatibleEmbedder("model", f"{base_url}/{path}").embed(
+                    ["one", "two"] if path in ("duplicate-index", "missing-index") else ["one"]
+                )
     finally:
         server.shutdown()
         thread.join()
         server.server_close()
 
-    assert requests[0] == (
+    assert first_request == (
         "/v1/embeddings",
         "Bearer test-key",
         {
@@ -133,6 +176,9 @@ def test_openai_compatible_embedder_validates_configuration():
         OpenAICompatibleEmbedder("")
     with pytest.raises(ValueError, match="URL"):
         OpenAICompatibleEmbedder("model", "")
+    with pytest.raises(ValueError, match="batch size"):
+        OpenAICompatibleEmbedder("model", batch_size=0)
+
     with pytest.raises(ValueError, match="timeout"):
         OpenAICompatibleEmbedder("model", timeout=0)
     with pytest.raises(ValueError, match="dimensions"):

@@ -27,16 +27,24 @@ class RAGService:
             self.settings.embedding_api_key,
             self.settings.embedding_timeout,
             self.settings.embedding_dimensions,
+            self.settings.embedding_batch_size,
         )
         self.chunker = chunker or ChonkieChunker(
             self.settings.chunker, self.settings.chunk_size, self.settings.chunk_overlap
         )
 
     def _prepare(self, content: str) -> tuple[list[str], list[list[float]]]:
+        if len(content.encode("utf-8")) > self.settings.max_document_bytes:
+            raise ValueError(f"document content exceeds {self.settings.max_document_bytes} bytes")
         chunks = self.chunker.chunk(content)
         if not chunks:
             raise ValueError("content must contain at least one non-whitespace character")
-        return chunks, self.embedder.embed(chunks)
+        embeddings = []
+        for start in range(0, len(chunks), self.settings.embedding_batch_size):
+            embeddings.extend(
+                self.embedder.embed(chunks[start : start + self.settings.embedding_batch_size])
+            )
+        return chunks, embeddings
 
     def ingest(
         self,
@@ -58,6 +66,7 @@ class RAGService:
     ) -> dict[str, Any]:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
+        self.store.get_document(document_id)
         chunks, embeddings = self._prepare(content)
         return self.store.replace_document(
             document_id, title, content, metadata or {}, chunks, embeddings

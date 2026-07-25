@@ -1,6 +1,7 @@
 """Pluggable embedding providers used by the ingestion and search pipeline."""
 
 import json
+import math
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
@@ -43,6 +44,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         api_key: str = "",
         timeout: float = 60.0,
         dimensions: int | None = None,
+        batch_size: int = 64,
     ) -> None:
         if not model.strip():
             raise ValueError("embedding model must not be empty")
@@ -52,14 +54,24 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise ValueError("embedding timeout must be positive")
         if dimensions is not None and dimensions < 1:
             raise ValueError("embedding dimensions must be positive")
+        if batch_size < 1:
+            raise ValueError("embedding batch size must be positive")
         self.model = model
         self.url = url
         self.api_key = api_key
         self.timeout = timeout
         self.dimensions = dimensions
+        self.batch_size = batch_size
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         inputs = list(texts)
+        return [
+            vector
+            for start in range(0, len(inputs), self.batch_size)
+            for vector in self._embed_batch(inputs[start : start + self.batch_size])
+        ]
+
+    def _embed_batch(self, inputs: list[str]) -> list[list[float]]:
         if not inputs:
             return []
         payload: dict[str, Any] = {
@@ -92,12 +104,21 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list) or len(data) != len(inputs):
             raise RuntimeError("Embedding endpoint returned an unexpected data count")
-        if data and all(isinstance(item, dict) and "index" in item for item in data):
-            data = sorted(data, key=lambda item: item["index"])
+        if not all(isinstance(item, dict) for item in data):
+            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+        indexes = [item.get("index") for item in data]
+        if any(isinstance(index, bool) or not isinstance(index, int) for index in indexes):
+            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+        if set(indexes) != set(range(len(inputs))):
+            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+        data = sorted(data, key=lambda item: item["index"])
         try:
-            return [[float(value) for value in item["embedding"]] for item in data]
+            embeddings = [[float(value) for value in item["embedding"]] for item in data]
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
+        if any(not all(math.isfinite(value) for value in vector) for vector in embeddings):
+            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+        return embeddings
 
 
 def create_embedder(
@@ -107,6 +128,7 @@ def create_embedder(
     embedding_api_key: str = "",
     embedding_timeout: float = 60.0,
     embedding_dimensions: int | None = None,
+    embedding_batch_size: int = 64,
 ) -> BaseEmbedder:
     normalized = provider.lower().replace("_", "-")
     if normalized in {"sentence-transformers", "sentence-transformer", "transformers"}:
@@ -118,5 +140,6 @@ def create_embedder(
             embedding_api_key,
             embedding_timeout,
             embedding_dimensions,
+            embedding_batch_size,
         )
     raise ValueError(f"Unknown embedding provider: {provider}")

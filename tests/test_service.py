@@ -64,3 +64,46 @@ def test_invalid_content_query_and_top_k(service):
         service.search("query", top_k=0)
     with pytest.raises(ValueError, match="between 1 and 100"):
         service.search("query", top_k=101)
+
+
+def test_update_checks_document_existence_before_embedding(service):
+    class CountingEmbedder:
+        calls = 0
+
+        def embed(self, texts):
+            self.calls += 1
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    embedder = CountingEmbedder()
+    service.embedder = embedder
+    with pytest.raises(DocumentNotFoundError):
+        service.update("missing", "Title", "content")
+    assert embedder.calls == 0
+
+
+def test_ingestion_batches_embedding_requests(service):
+    class BatchCountingEmbedder:
+        def __init__(self):
+            self.batch_sizes = []
+
+        def embed(self, texts):
+            self.batch_sizes.append(len(texts))
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    embedder = BatchCountingEmbedder()
+    configured = RAGService(
+        SQLiteStore(),
+        embedder,
+        service.chunker,
+        Settings(embedding_batch_size=2),
+    )
+    configured.ingest("Batched", "one|two|three")
+    assert embedder.batch_sizes == [2, 1]
+
+
+def test_service_enforces_document_limit(service):
+    configured = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=4)
+    )
+    with pytest.raises(ValueError, match="document content"):
+        configured.ingest("Too large", "12345")

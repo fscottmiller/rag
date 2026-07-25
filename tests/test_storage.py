@@ -64,6 +64,18 @@ def test_replace_and_delete_remove_old_vectors():
     store.close()
 
 
+def test_search_refreshes_vector_dimension_for_late_writer(tmp_path):
+    database = tmp_path / "shared.sqlite3"
+    reader = SQLiteStore(str(database))
+    writer = SQLiteStore(str(database))
+    assert reader.search([1.0, 0.0], 1) == []
+    writer.create_document("Guide", "text", {}, ["text"], [[1.0, 0.0]])
+
+    assert reader.search([1.0, 0.0], 1)[0]["title"] == "Guide"
+    reader.close()
+    writer.close()
+
+
 def test_storage_rejects_mismatched_or_empty_embeddings():
     store = SQLiteStore()
     with pytest.raises(ValueError, match="one embedding"):
@@ -72,6 +84,10 @@ def test_storage_rejects_mismatched_or_empty_embeddings():
         store.create_document("Bad", "text", {}, ["one", "two"], [[1.0, 0.0], [1.0]])
     with pytest.raises(ValueError, match="same non-zero dimension"):
         store.create_document("Bad", "text", {}, ["one"], [[]])
+    with pytest.raises(ValueError, match="finite"):
+        store.create_document("Bad", "text", {}, ["one"], [[float("nan")]])
+    with pytest.raises(ValueError, match="finite"):
+        store.create_document("Bad", "text", {}, ["one"], [["not-a-number"]])
     store.close()
 
 
@@ -95,6 +111,16 @@ def test_metadata_filter_searches_beyond_initial_candidate_window():
 
     results = store.search([1.0, 0.0], 1, {"group": "target"})
     assert [item["document_id"] for item in results] == [target["id"]]
+    store.close()
+
+
+def test_metadata_filter_distinguishes_missing_and_null_values():
+    store = SQLiteStore()
+    store.create_document("Missing", "text", {}, ["text"], [[1.0, 0.0]])
+    explicit_null = store.create_document("Null", "text", {"topic": None}, ["text"], [[1.0, 0.0]])
+
+    results = store.search([1.0, 0.0], 2, {"topic": None})
+    assert [item["document_id"] for item in results] == [explicit_null["id"]]
     store.close()
 
 

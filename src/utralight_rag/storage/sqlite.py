@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import threading
@@ -107,6 +108,14 @@ class SQLiteStore:
             dimension = len(embeddings[0])
             if dimension == 0 or any(len(vector) != dimension for vector in embeddings):
                 raise ValueError("All embeddings must have the same non-zero dimension")
+            try:
+                finite = all(
+                    math.isfinite(float(value)) for vector in embeddings for value in vector
+                )
+            except (TypeError, ValueError):
+                finite = False
+            if not finite:
+                raise ValueError("Embeddings must contain only finite numbers")
 
     @_synchronized
     def create_document(
@@ -268,6 +277,8 @@ class SQLiteStore:
         self, vector: list[float], top_k: int, filter_metadata: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         if self._vector_dimension is None:
+            self._load_vector_dimension()
+        if self._vector_dimension is None:
             return []
         if len(vector) != self._vector_dimension:
             raise ValueError("Search embedding dimension does not match indexed embeddings")
@@ -288,7 +299,8 @@ class SQLiteStore:
         for row in rows:
             metadata = self._decode_metadata(row["document_metadata"])
             if filter_metadata and any(
-                metadata.get(key) != value for key, value in filter_metadata.items()
+                key not in metadata or metadata[key] != value
+                for key, value in filter_metadata.items()
             ):
                 continue
             result.append(

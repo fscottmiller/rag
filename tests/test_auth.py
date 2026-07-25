@@ -49,3 +49,18 @@ def test_trusted_proxy_rejects_unknown_roles():
 def test_authorizer_rejects_unknown_mode():
     with pytest.raises(ValueError, match="RAG_AUTH_MODE"):
         Authorizer(Settings(auth_mode="unsupported"))
+
+
+def test_trusted_proxy_rejects_empty_or_ambiguous_role_configuration():
+    with pytest.raises(ValueError, match="role"):
+        Authorizer(Settings(auth_mode="trusted-proxy", proxy_admin_role=""))
+    with pytest.raises(ValueError, match="distinct"):
+        Authorizer(
+            Settings(
+                auth_mode="trusted-proxy",
+                proxy_admin_role="same",
+                proxy_reader_role="same",
+            )
+        )
+    with pytest.raises(ValueError, match="header"):
+        Authorizer(Settings(auth_mode="trusted-proxy", proxy_user_header=" "))
