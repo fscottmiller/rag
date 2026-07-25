@@ -3,6 +3,9 @@
 import os
 from dataclasses import dataclass, field
 
+DEFAULT_MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_REQUEST_BYTES = DEFAULT_MAX_DOCUMENT_BYTES + 64 * 1024
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -21,14 +24,22 @@ class Settings:
     chunker: str = "recursive"
     chunk_size: int = 512
     chunk_overlap: int = 64
-    max_document_bytes: int = 10 * 1024 * 1024
+    max_document_bytes: int = DEFAULT_MAX_DOCUMENT_BYTES
+    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     embedding_batch_size: int = 64
+    trusted_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
 
     def __post_init__(self) -> None:
         if self.max_document_bytes < 1:
             raise ValueError("max_document_bytes must be positive")
+        if self.max_request_bytes < 1:
+            raise ValueError("max_request_bytes must be positive")
+        if self.max_request_bytes < self.max_document_bytes:
+            raise ValueError("max_request_bytes must not be smaller than max_document_bytes")
         if self.embedding_batch_size < 1:
             raise ValueError("embedding_batch_size must be positive")
+        if not self.trusted_hosts or any(not host.strip() for host in self.trusted_hosts):
+            raise ValueError("trusted_hosts must contain at least one non-empty host")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -71,6 +82,18 @@ class Settings:
             chunker=os.getenv("RAG_CHUNKER", "recursive"),
             chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "512")),
             chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "64")),
-            max_document_bytes=int(os.getenv("RAG_MAX_DOCUMENT_BYTES", str(10 * 1024 * 1024))),
+            max_document_bytes=int(
+                os.getenv("RAG_MAX_DOCUMENT_BYTES", str(DEFAULT_MAX_DOCUMENT_BYTES))
+            ),
+            max_request_bytes=int(
+                os.getenv("RAG_MAX_REQUEST_BYTES", str(DEFAULT_MAX_REQUEST_BYTES))
+            ),
             embedding_batch_size=int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "64")),
+            trusted_hosts=tuple(
+                host.strip()
+                for host in os.getenv("RAG_TRUSTED_HOSTS", "localhost,127.0.0.1,testserver").split(
+                    ","
+                )
+                if host.strip()
+            ),
         )

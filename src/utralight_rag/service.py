@@ -10,6 +10,10 @@ from .pipeline.embeddings import BaseEmbedder, create_embedder
 from .storage.sqlite import SQLiteStore
 
 
+class DocumentTooLargeError(ValueError):
+    """The request contains more document content than configured."""
+
+
 class RAGService:
     def __init__(
         self,
@@ -35,7 +39,9 @@ class RAGService:
 
     def _prepare(self, content: str) -> tuple[list[str], list[list[float]]]:
         if len(content.encode("utf-8")) > self.settings.max_document_bytes:
-            raise ValueError(f"document content exceeds {self.settings.max_document_bytes} bytes")
+            raise DocumentTooLargeError(
+                f"document content exceeds {self.settings.max_document_bytes} bytes"
+            )
         chunks = self.chunker.chunk(content)
         if not chunks:
             raise ValueError("content must contain at least one non-whitespace character")

@@ -11,7 +11,9 @@ def test_settings_defaults_are_in_memory_and_local():
     assert settings.chunk_size == 512
     assert settings.chunk_overlap == 64
     assert settings.max_document_bytes == 10 * 1024 * 1024
+    assert settings.max_request_bytes == 10 * 1024 * 1024 + 64 * 1024
     assert settings.embedding_batch_size == 64
+    assert settings.trusted_hosts == ("localhost", "127.0.0.1", "testserver")
 
 
 def test_settings_read_all_environment_values(monkeypatch):
@@ -27,7 +29,9 @@ def test_settings_read_all_environment_values(monkeypatch):
         "RAG_CHUNK_SIZE": "128",
         "RAG_CHUNK_OVERLAP": "16",
         "RAG_MAX_DOCUMENT_BYTES": "2048",
+        "RAG_MAX_REQUEST_BYTES": "4096",
         "RAG_EMBEDDING_BATCH_SIZE": "8",
+        "RAG_TRUSTED_HOSTS": "app.example, localhost",
         "RAG_AUTH_MODE": "trusted-proxy",
         "RAG_PROXY_USER_HEADER": "X-User",
         "RAG_PROXY_ROLE_HEADER": "X-Role",
@@ -49,7 +53,9 @@ def test_settings_read_all_environment_values(monkeypatch):
         chunk_size=128,
         chunk_overlap=16,
         max_document_bytes=2048,
+        max_request_bytes=4096,
         embedding_batch_size=8,
+        trusted_hosts=("app.example", "localhost"),
         auth_mode="trusted-proxy",
         proxy_user_header="X-User",
         proxy_role_header="X-Role",
@@ -77,11 +83,17 @@ def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypa
     assert "fallback-key" not in repr(settings)
 
 
-def test_settings_reject_non_positive_limits():
+def test_settings_reject_invalid_limits_and_hosts():
     with pytest.raises(ValueError, match="max_document_bytes"):
         Settings(max_document_bytes=0)
+    with pytest.raises(ValueError, match="max_request_bytes"):
+        Settings(max_request_bytes=0)
+    with pytest.raises(ValueError, match="smaller"):
+        Settings(max_document_bytes=10, max_request_bytes=9)
     with pytest.raises(ValueError, match="embedding_batch_size"):
         Settings(embedding_batch_size=0)
+    with pytest.raises(ValueError, match="trusted_hosts"):
+        Settings(trusted_hosts=())
 
 
 def test_settings_reject_non_integer_chunk_configuration(monkeypatch):

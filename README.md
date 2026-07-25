@@ -95,7 +95,7 @@ When REST and MCP run as separate processes, set the same file-backed `RAG_DATAB
 
 ## Authentication and authorization
 
-The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. REST rejects cross-origin browser mutations even in open mode to prevent malicious webpages from posting to a local instance. Use this mode only on a trusted local network.
+The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. REST rejects cross-origin browser mutations even in open mode to prevent malicious webpages from posting to a local instance. The REST host must also be in `RAG_TRUSTED_HOSTS`, which prevents DNS-rebinding requests from bypassing that protection. Use this mode only on a trusted local network.
 
 For a deployment behind an authenticating reverse proxy or Cloudflare Access tunnel, set `RAG_AUTH_MODE=trusted-proxy`. The application trusts the proxy to authenticate the request and to overwrite the configured identity and role headers:
 
@@ -128,7 +128,9 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_CHUNKER` | `recursive` | Select `recursive`, `sentence`, or `token`. |
 | `RAG_CHUNK_SIZE` | `512` | Target chunk size. |
 | `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks; recursive chunking prepends the prior chunk's trailing characters. |
-| `RAG_MAX_DOCUMENT_BYTES` | `10485760` | Maximum document content size accepted by REST. |
+| `RAG_MAX_DOCUMENT_BYTES` | `10485760` | Maximum document content size accepted by REST after parsing. |
+| `RAG_MAX_REQUEST_BYTES` | `10551296` | Maximum raw HTTP request body accepted before parsing; keep this at or above the document limit to allow request overhead. |
+| `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
 | `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
 | `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. |
 | `MCP_HOST` | `127.0.0.1` | Bind host for streamable HTTP. |
