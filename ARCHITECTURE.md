@@ -64,7 +64,7 @@ Alternative: collections inside one process would reduce the number of processes
 
 ### ADR-008: Explicit runtime authorization modes
 
-The default `none` mode keeps local development frictionless and grants non-browser callers full CRUD and search access. REST rejects cross-origin browser mutations even in this mode, preventing a malicious webpage from posting to a local instance. `trusted-proxy` mode delegates authentication to a reverse proxy and maps its identity and role headers to exactly two roles: `admin` for all operations and `reader` for list/get/search only. Header names and role values must be non-empty, and the two configured roles must be distinct. The application rejects missing identities and unknown roles, but intentionally does not verify proxy credentials. Deployments must prevent direct access and strip client-supplied identity headers at the proxy boundary.
+The default `none` mode keeps local development frictionless and grants non-browser callers full CRUD and search access. REST rejects cross-origin browser mutations even in this mode, preventing a malicious webpage from posting to a local instance. A trusted-host allowlist also rejects DNS-rebinding requests before routing, so the client-controlled Host header is never used as the security decision. `trusted-proxy` mode delegates authentication to a reverse proxy and maps its identity and role headers to exactly two roles: `admin` for all operations and `reader` for list/get/search only. Header names and role values must be non-empty, and the two configured roles must be distinct. The application rejects missing identities and unknown roles, but intentionally does not verify proxy credentials. Deployments must prevent direct access and strip client-supplied identity headers at the proxy boundary.
 
 Alternative: embedding authentication in this service would duplicate the proxy or Cloudflare Access identity provider and add credential lifecycle concerns outside the service's scope.
 
@@ -73,6 +73,12 @@ Alternative: embedding authentication in this service would duplicate the proxy 
 MCP uses stdio by default for local clients. Streamable HTTP is an explicit opt-in for networked clients and proxy deployments. Legacy network transport support is not exposed by this adapter.
 
 Alternative: a network transport as the default would make local use less secure and less compatible with desktop MCP clients.
+
+### ADR-010: Separate transport and document limits
+
+The REST adapter enforces `RAG_MAX_REQUEST_BYTES` in ASGI middleware before request parsing, including chunked bodies, and returns 413 when the raw body is too large. `RAG_MAX_DOCUMENT_BYTES` remains an exact UTF-8 content limit checked after JSON or multipart parsing and by the service for both POST and PUT. The request limit defaults to the document limit plus overhead so valid documents are not rejected because of JSON or multipart framing.
+
+Alternative: comparing Content-Length directly with the document limit is incorrect because request framing, titles, metadata, and multipart fields are not document content; parsing first also permits avoidable resource exhaustion.
 
 ## Running
 

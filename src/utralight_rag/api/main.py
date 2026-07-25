@@ -9,15 +9,69 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..auth import AuthenticationError, AuthorizationError, Authorizer
-from ..service import RAGService
+from ..service import DocumentTooLargeError, RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
 
 
-class DocumentTooLargeError(ValueError):
-    """The request contains more document content than configured."""
+class BodySizeLimitMiddleware:
+    def __init__(self, app: Any, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        content_length = next(
+            (value for key, value in scope["headers"] if key.lower() == b"content-length"), None
+        )
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_bytes:
+                    await self._reject(send)
+                    return
+            except ValueError:
+                await self._reject(send)
+                return
+
+        body = bytearray()
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_bytes:
+                await self._reject(send)
+                return
+            more_body = message.get("more_body", False)
+
+        sent = False
+
+        async def replay() -> dict[str, Any]:
+            nonlocal sent
+            if sent:
+                return {"type": "http.disconnect"}
+            sent = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+    async def _reject(self, send: Any) -> None:
+        body = b"request body exceeds configured limit"
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 def create_app(service: RAGService | None = None) -> FastAPI:
@@ -25,6 +79,8 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     authorizer = Authorizer(rag.settings)
     app = FastAPI(title="Utralight RAG MCP", version="0.1.0")
     app.state.rag = rag
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=rag.settings.max_request_bytes)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(rag.settings.trusted_hosts))
 
     def require(request: Request, action: str) -> None:
         if action == "write" and authorizer.mode == "none":
@@ -52,6 +108,8 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
             return await run_in_threadpool(rag.ingest, **payload)
+        except DocumentTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -77,6 +135,8 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             return rag.update(document_id, **payload.model_dump())
         except DocumentNotFoundError:
             raise HTTPException(status_code=404, detail="Document not found")
+        except DocumentTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -102,14 +162,6 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 async def _read_document_request(request: Request) -> dict[str, Any]:
     max_bytes = request.app.state.rag.settings.max_document_bytes
     content_type = request.headers.get("content-type", "")
-    content_length = request.headers.get("content-length")
-    if (
-        content_length
-        and not content_type.startswith("multipart/form-data")
-        and int(content_length) > max_bytes
-    ):
-        raise DocumentTooLargeError(f"document request exceeds {max_bytes} bytes")
-
     if content_type.startswith("application/json"):
         payload = DocumentPayload.model_validate(await request.json()).model_dump()
         if len(payload["content"].encode("utf-8")) > max_bytes:
