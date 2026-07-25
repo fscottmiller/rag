@@ -9,7 +9,7 @@ The default database is in memory. Data is intentionally temporary.
 ```bash
 uv sync
 uv sync --extra local-embeddings
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn transient_rag.api.main:app --reload
 ```
 
 The second command installs the default Sentence Transformers provider. For any OpenAI-compatible embedding API, configure the endpoint, model, and optional credentials in the environment:
@@ -19,7 +19,7 @@ RAG_EMBEDDING_PROVIDER=openai-compatible \
 RAG_EMBEDDING_URL=https://api.openai.com/v1/embeddings \
 RAG_EMBEDDING_MODEL=text-embedding-3-small \
 RAG_EMBEDDING_API_KEY="$OPENAI_API_KEY" \
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn transient_rag.api.main:app --reload
 ```
 
 Ollama uses the same OpenAI-compatible protocol and settings; there are no separate Ollama variables:
@@ -28,7 +28,7 @@ Ollama uses the same OpenAI-compatible protocol and settings; there are no separ
 RAG_EMBEDDING_PROVIDER=ollama \
 RAG_EMBEDDING_URL=http://localhost:11434/v1/embeddings \
 RAG_EMBEDDING_MODEL=nomic-embed-text \
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn transient_rag.api.main:app --reload
 ```
 
 Open the interactive API documentation at <http://127.0.0.1:8000/docs>.
@@ -38,8 +38,8 @@ Open the interactive API documentation at <http://127.0.0.1:8000/docs>.
 Each running service instance owns one index, one SQLite database, and one embedding/chunking configuration. Run separate instances for independent indexes rather than configuring collections inside one process:
 
 ```bash
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn src.api.main:app --port 8001
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn src.api.main:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn transient_rag.api.main:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn transient_rag.api.main:app --port 8002
 ```
 
 Use a separate database path and port for every instance. This keeps vector spaces, chunking behavior, and lifecycle management isolated.
@@ -76,7 +76,7 @@ Available endpoints:
 Run the MCP server over stdio (the default):
 
 ```bash
-uv run python -m src.mcp_server.server
+uv run python -m transient_rag.mcp_server.server
 ```
 
 Use streamable HTTP when an MCP client or proxy needs an HTTP endpoint:
@@ -86,7 +86,7 @@ MCP_TRANSPORT=streamable-http \
 MCP_HOST=127.0.0.1 \
 MCP_PORT=8000 \
 MCP_PATH=/mcp \
-uv run python -m src.mcp_server.server
+uv run python -m transient_rag.mcp_server.server
 ```
 
 Available tools: `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
@@ -105,7 +105,7 @@ RAG_PROXY_USER_HEADER=Cf-Access-Authenticated-User-Email \
 RAG_PROXY_ROLE_HEADER=X-Auth-Request-Role \
 RAG_PROXY_ADMIN_ROLE=admin \
 RAG_PROXY_READER_ROLE=reader \
-uv run uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn transient_rag.api.main:app --host 127.0.0.1 --port 8000
 ```
 
 Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.

@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from ..auth import AuthenticationError, AuthorizationError, Authorizer
@@ -37,17 +38,17 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         except (ValidationError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            return rag.ingest(**payload)
+            return await run_in_threadpool(rag.ingest, **payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/documents")
-    async def list_documents(request: Request) -> list[dict[str, Any]]:
+    def list_documents(request: Request) -> list[dict[str, Any]]:
         require(request, "read")
         return rag.list_documents()
 
     @app.get("/documents/{document_id}")
-    async def get_document(request: Request, document_id: str) -> dict[str, Any]:
+    def get_document(request: Request, document_id: str) -> dict[str, Any]:
         require(request, "read")
         try:
             return rag.get_document(document_id)
@@ -55,7 +56,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Document not found")
 
     @app.put("/documents/{document_id}")
-    async def update_document(
+    def update_document(
         request: Request, document_id: str, payload: DocumentPayload
     ) -> dict[str, Any]:
         require(request, "write")
@@ -67,15 +68,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.delete("/documents/{document_id}", status_code=204)
-    async def delete_document(request: Request, document_id: str) -> None:
-        require(request, "delete")
+    def delete_document(request: Request, document_id: str) -> None:
+        require(request, "write")
         try:
             rag.delete_document(document_id)
         except DocumentNotFoundError:
             raise HTTPException(status_code=404, detail="Document not found")
 
     @app.post("/search")
-    async def search(request: Request, payload: SearchPayload) -> list[dict[str, Any]]:
+    def search(request: Request, payload: SearchPayload) -> list[dict[str, Any]]:
         require(request, "read")
         try:
             return rag.search(payload.query, payload.top_k, payload.filter_metadata)

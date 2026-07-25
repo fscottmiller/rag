@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from src.pipeline.embeddings import (
+from transient_rag.pipeline.embeddings import (
     BaseEmbedder,
     OpenAICompatibleEmbedder,
     SentenceTransformerEmbedder,
@@ -36,7 +36,6 @@ def test_embedder_factory_supports_provider_aliases():
     assert openai_embedder.dimensions == 768
     with pytest.raises(ValueError, match="Unknown embedding provider"):
         create_embedder("unknown", "model", "url")
-
 
 
 def test_ollama_uses_openai_compatible_embeddings_endpoint():

@@ -1,6 +1,6 @@
 import pytest
 
-from src.mcp_server.server import create_mcp, get_transport
+from transient_rag.mcp_server.server import create_mcp, get_transport
 
 
 def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
@@ -24,6 +24,7 @@ async def test_mcp_tools_share_service_lifecycle(service):
         "upload_document",
         "delete_document",
     }
+    assert all("ctx" not in tool.inputSchema.get("properties", {}) for tool in tools)
 
     _, created = await server.call_tool(
         "upload_document",

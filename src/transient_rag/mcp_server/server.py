@@ -10,7 +10,6 @@ from mcp.server.fastmcp import Context, FastMCP
 from ..auth import Authorizer
 from ..service import RAGService
 
-
 _ALLOWED_TRANSPORTS = {"stdio", "streamable-http"}
 
 
@@ -32,8 +31,10 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
     )
 
     def authorize(ctx: Context, action: str) -> None:
-        request_context = ctx._request_context
-        request = request_context.request if request_context is not None else None
+        try:
+            request = ctx.request_context.request
+        except ValueError:
+            request = None
         headers = getattr(request, "headers", {}) if request is not None else {}
         authorizer.authorize(headers, action)
 
@@ -42,25 +43,23 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
         query: str,
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
-        ctx: Context | None = None,
+        *,
+        ctx: Context,
     ) -> list[dict[str, Any]]:
         """Search indexed chunks by semantic similarity."""
-        if ctx is not None:
-            authorize(ctx, "read")
+        authorize(ctx, "read")
         return rag.search(query, top_k, filter_metadata)
 
     @server.tool()
-    def list_documents(ctx: Context | None = None) -> list[dict[str, Any]]:
+    def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
         """List documents currently held in the transient index."""
-        if ctx is not None:
-            authorize(ctx, "read")
+        authorize(ctx, "read")
         return rag.list_documents()
 
     @server.tool()
-    def get_document(document_id: str, ctx: Context | None = None) -> dict[str, Any]:
+    def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
         """Retrieve one document, metadata, and its chunks."""
-        if ctx is not None:
-            authorize(ctx, "read")
+        authorize(ctx, "read")
         return rag.get_document(document_id)
 
     @server.tool()
@@ -68,18 +67,17 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
         title: str,
         content: str,
         metadata: dict[str, Any] | None = None,
-        ctx: Context | None = None,
+        *,
+        ctx: Context,
     ) -> dict[str, Any]:
         """Ingest a document directly into the temporary index."""
-        if ctx is not None:
-            authorize(ctx, "write")
+        authorize(ctx, "write")
         return rag.ingest(title, content, metadata)
 
     @server.tool()
-    def delete_document(document_id: str, ctx: Context | None = None) -> dict[str, str]:
+    def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
         """Delete a document and all of its indexed chunks."""
-        if ctx is not None:
-            authorize(ctx, "delete")
+        authorize(ctx, "write")
         rag.delete_document(document_id)
         return {"status": "deleted", "document_id": document_id}
 

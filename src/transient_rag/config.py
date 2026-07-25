@@ -29,7 +29,9 @@ class Settings:
         default_model = (
             "text-embedding-3-small"
             if normalized_provider in {"openai", "openai-compatible", "openai-compatible-api"}
-            else "nomic-embed-text" if normalized_provider == "ollama" else "all-MiniLM-L6-v2"
+            else "nomic-embed-text"
+            if normalized_provider == "ollama"
+            else "all-MiniLM-L6-v2"
         )
         default_url = (
             "http://localhost:11434/v1/embeddings"
@@ -41,7 +43,10 @@ class Settings:
             embedding_provider=provider,
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL", default_model),
             embedding_url=os.getenv("RAG_EMBEDDING_URL", default_url),
-            embedding_api_key=os.getenv("RAG_EMBEDDING_API_KEY", os.getenv("OPENAI_API_KEY", "")),
+            embedding_api_key=os.getenv(
+                "RAG_EMBEDDING_API_KEY",
+                "" if normalized_provider == "ollama" else os.getenv("OPENAI_API_KEY", ""),
+            ),
             embedding_timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT", "60")),
             embedding_dimensions=(
                 int(os.environ["RAG_EMBEDDING_DIMENSIONS"])

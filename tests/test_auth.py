@@ -1,7 +1,7 @@
 import pytest
 
-from src.auth import AuthenticationError, AuthorizationError, Authorizer
-from src.config import Settings
+from transient_rag.auth import AuthenticationError, AuthorizationError, Authorizer
+from transient_rag.config import Settings
 
 
 def test_no_auth_mode_grants_every_action():
@@ -25,9 +25,7 @@ def test_trusted_proxy_requires_identity_and_maps_roles():
     with pytest.raises(AuthorizationError):
         authorizer.authorize({"X-User": "reader@example.test", "X-Role": "viewer"}, "write")
     assert (
-        authorizer.authorize(
-            {"X-User": "reader@example.test", "X-Role": "viewer"}, "read"
-        ).role
+        authorizer.authorize({"X-User": "reader@example.test", "X-Role": "viewer"}, "read").role
         == "reader"
     )
     assert (

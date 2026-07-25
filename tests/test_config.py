@@ -1,6 +1,6 @@
 import pytest
 
-from src.config import Settings
+from transient_rag.config import Settings
 
 
 def test_settings_defaults_are_transient_and_local():
@@ -54,6 +54,7 @@ def test_settings_read_all_environment_values(monkeypatch):
 
 def test_ollama_uses_common_openai_compatible_settings(monkeypatch):
     monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings = Settings.from_env()
     assert settings.embedding_model == "nomic-embed-text"
     assert settings.embedding_url == "http://localhost:11434/v1/embeddings"

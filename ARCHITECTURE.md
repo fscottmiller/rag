@@ -5,14 +5,18 @@
 This project provides a short-lived local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations.
 
 Each service process owns exactly one index and one SQLite database. The default database is in memory; set `RAG_DATABASE_PATH` to use one local SQLite file when a process restart should preserve that index. Independent indexes run as independent service instances rather than as collections inside one process. The design intentionally does not include background jobs, evaluation metrics, synthetic QA generation, or benchmark code.
+REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. This is a deliberate transient-scale ceiling rather than a substitute for a multi-process database layer.
+
 
 ## Components
 
-- `src/api`: JSON and multipart REST routes for document CRUD and search.
-- `src/mcp_server`: FastMCP tools with direct mappings to the service operations.
-- `src/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
-- `src/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
-- `src/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
+- `src/transient_rag/api`: JSON and multipart REST routes for document CRUD and search.
+- `src/transient_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
+- `src/transient_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
+- `src/transient_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
+- `src/transient_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
+
+The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for its transient scale, but large filtered indexes would need database-side filtering or metadata indexes.
 
 ## Architectural decisions
 
@@ -78,13 +82,13 @@ uv sync
 uv sync --extra local-embeddings
 
 # Terminal 1: one instance owns one index.
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn src.api.main:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn transient_rag.api.main:app --port 8001
 # Terminal 2:
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn src.api.main:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn transient_rag.api.main:app --port 8002
 
-uv run python -m src.mcp_server.server
+uv run python -m transient_rag.mcp_server.server
 MCP_TRANSPORT=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp \
-  uv run python -m src.mcp_server.server
+  uv run python -m transient_rag.mcp_server.server
 uv run pytest
 ```
 
