@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
 from ..service import RAGService
@@ -20,7 +21,10 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
     @app.post("/documents", status_code=201)
     async def create_document(request: Request) -> dict[str, Any]:
-        payload = await _read_document_request(request)
+        try:
+            payload = await _read_document_request(request)
+        except (ValidationError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
             return rag.ingest(**payload)
         except ValueError as exc:
@@ -55,7 +59,10 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
     @app.post("/search")
     async def search(payload: SearchPayload) -> list[dict[str, Any]]:
-        return rag.search(payload.query, payload.top_k, payload.filter_metadata)
+        try:
+            return rag.search(payload.query, payload.top_k, payload.filter_metadata)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 
@@ -75,19 +82,16 @@ async def _read_document_request(request: Request) -> dict[str, Any]:
     metadata: Any = form.get("metadata", {})
     if isinstance(metadata, str):
         metadata = json.loads(metadata) if metadata else {}
-    def optional_int(name: str) -> int | None:
-        value = form.get(name)
-        return int(value) if value not in (None, "") else None
 
-    return DocumentPayload(
-        title=title,
-        content=content,
-        metadata=metadata,
-        chunking_strategy=form.get("chunking_strategy"),
-        chunk_size=optional_int("chunk_size"),
-        chunk_overlap=optional_int("chunk_overlap"),
-        embedding_choice=form.get("embedding_choice"),
-    ).model_dump()
+    payload = {"title": title, "content": content, "metadata": metadata}
+    forbidden_options = {
+        name: form.get(name)
+        for name in ("chunking_strategy", "chunk_size", "chunk_overlap", "embedding_choice")
+        if form.get(name) not in (None, "")
+    }
+    if forbidden_options:
+        raise ValueError("Per-document embedding and chunking overrides are not supported")
+    return DocumentPayload.model_validate(payload).model_dump()
 
 
 app = create_app()

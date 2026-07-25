@@ -15,7 +15,9 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
     server = FastMCP("transient-rag")
 
     @server.tool()
-    def rag_search(query: str, top_k: int = 5, filter_metadata: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def rag_search(
+        query: str, top_k: int = 5, filter_metadata: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Search indexed chunks by semantic similarity."""
         return rag.search(query, top_k, filter_metadata)
 
@@ -30,7 +32,9 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
         return rag.get_document(document_id)
 
     @server.tool()
-    def upload_document(title: str, content: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    def upload_document(
+        title: str, content: str, metadata: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Ingest a document directly into the temporary index."""
         return rag.ingest(title, content, metadata)
 

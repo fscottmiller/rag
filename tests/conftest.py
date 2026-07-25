@@ -11,7 +11,9 @@ class KeywordEmbedder(BaseEmbedder):
         vectors = []
         for text in texts:
             lower = text.lower()
-            vectors.append([float("python" in lower), float("sqlite" in lower), float("fastapi" in lower)])
+            vectors.append(
+                [float("python" in lower), float("sqlite" in lower), float("fastapi" in lower)]
+            )
         return vectors
 
 

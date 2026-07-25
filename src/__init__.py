@@ -1,2 +1,1 @@
 """Transient RAG MCP service."""
-

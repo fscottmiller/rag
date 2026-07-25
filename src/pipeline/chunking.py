@@ -47,4 +47,6 @@ class ChonkieChunker(BaseChunker):
     def chunk(self, text: str) -> list[str]:
         if not text.strip():
             return []
-        return [piece for piece in (_chunk_text(item) for item in self._chunker.chunk(text)) if piece]
+        return [
+            piece for piece in (_chunk_text(item) for item in self._chunker.chunk(text)) if piece
+        ]

@@ -5,7 +5,9 @@ from src.api.main import create_app
 
 def test_rest_lifecycle(service):
     client = TestClient(create_app(service))
-    response = client.post("/documents", json={"title": "REST", "content": "one|two", "metadata": {"source": "test"}})
+    response = client.post(
+        "/documents", json={"title": "REST", "content": "one|two", "metadata": {"source": "test"}}
+    )
     assert response.status_code == 201
     document = response.json()
     document_id = document["id"]
@@ -13,7 +15,9 @@ def test_rest_lifecycle(service):
 
     assert client.get("/documents").json()[0]["id"] == document_id
     assert client.get(f"/documents/{document_id}").json()["content"] == "one|two"
-    response = client.put(f"/documents/{document_id}", json={"title": "REST 2", "content": "replacement"})
+    response = client.put(
+        f"/documents/{document_id}", json={"title": "REST 2", "content": "replacement"}
+    )
     assert response.status_code == 200
     assert response.json()["title"] == "REST 2"
     assert client.delete(f"/documents/{document_id}").status_code == 204
@@ -39,3 +43,66 @@ def test_rest_file_upload(service):
     assert response.json()["title"] == "notes.md"
     assert response.json()["metadata"] == {"source": "file"}
 
+
+def test_rest_not_found_and_validation_errors(service):
+    client = TestClient(create_app(service))
+    missing = "missing-document"
+    assert client.get(f"/documents/{missing}").status_code == 404
+    assert (
+        client.put(f"/documents/{missing}", json={"title": "x", "content": "x"}).status_code == 404
+    )
+    assert client.delete(f"/documents/{missing}").status_code == 404
+    assert client.post("/documents", json={"title": "", "content": "x"}).status_code == 422
+    assert client.post("/documents", json={"title": "x", "content": ""}).status_code == 422
+    assert client.post("/search", json={"query": "x", "top_k": 0}).status_code == 422
+    assert client.post("/search", json={"query": "x", "top_k": 101}).status_code == 422
+    assert client.post("/search", json={"query": " "}).status_code == 400
+
+
+def test_rest_rejects_per_document_index_options(service):
+    client = TestClient(create_app(service))
+    response = client.post(
+        "/documents",
+        files={"file": ("notes.txt", b"one two three four")},
+        data={"chunk_size": "2", "title": "Token notes"},
+    )
+    assert response.status_code == 422
+    assert (
+        client.post(
+            "/documents",
+            json={"title": "Token notes", "content": "content", "embedding_choice": "other"},
+        ).status_code
+        == 422
+    )
+
+
+def test_rest_rejects_bad_form_metadata_and_bad_json(service):
+    client = TestClient(create_app(service))
+    bad_metadata = client.post(
+        "/documents",
+        files={"file": ("notes.txt", b"content")},
+        data={"metadata": "not-json"},
+    )
+    assert bad_metadata.status_code == 422
+    bad_json = client.post(
+        "/documents",
+        content="{not-json",
+        headers={"content-type": "application/json"},
+    )
+    assert bad_json.status_code == 422
+
+
+def test_rest_form_content_and_service_validation_errors(service):
+    client = TestClient(create_app(service))
+    form = client.post("/documents", data={"title": "Form", "content": "plain text"})
+    assert form.status_code == 201
+    assert form.json()["title"] == "Form"
+
+    empty_create = client.post("/documents", json={"title": "Whitespace", "content": " "})
+    assert empty_create.status_code == 400
+    document_id = form.json()["id"]
+    empty_update = client.put(
+        f"/documents/{document_id}",
+        json={"title": " ", "content": "replacement"},
+    )
+    assert empty_update.status_code == 400
