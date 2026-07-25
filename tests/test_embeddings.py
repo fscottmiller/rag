@@ -183,3 +183,10 @@ def test_openai_compatible_embedder_validates_configuration():
         OpenAICompatibleEmbedder("model", timeout=0)
     with pytest.raises(ValueError, match="dimensions"):
         OpenAICompatibleEmbedder("model", dimensions=0)
+
+
+def test_openai_compatible_embedder_rejects_non_http_urls():
+    with pytest.raises(ValueError, match="http or https"):
+        OpenAICompatibleEmbedder("model", "file:///tmp/embeddings")
+    with pytest.raises(ValueError, match="http or https"):
+        OpenAICompatibleEmbedder("model", "ftp://embedding.example/v1/embeddings")

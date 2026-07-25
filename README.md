@@ -121,7 +121,7 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_DATABASE_PATH` | `:memory:` | Use a SQLite file instead of memory. |
 | `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` | Select `sentence-transformers`, `openai-compatible`, or `ollama`. |
 | `RAG_EMBEDDING_MODEL` | provider-dependent | Embedding model name sent to the configured provider. Ollama defaults to `nomic-embed-text`. |
-| `RAG_EMBEDDING_URL` | provider-dependent | OpenAI-compatible embeddings endpoint. Ollama defaults to `http://localhost:11434/v1/embeddings`. |
+| `RAG_EMBEDDING_URL` | provider-dependent | OpenAI-compatible HTTP(S) embeddings endpoint. Ollama defaults to `http://localhost:11434/v1/embeddings`; non-HTTP schemes are rejected. |
 | `RAG_EMBEDDING_API_KEY` | `OPENAI_API_KEY` fallback | Optional Bearer token for the embeddings endpoint. |
 | `RAG_EMBEDDING_TIMEOUT` | `60` | Embedding request timeout in seconds. |
 | `RAG_EMBEDDING_DIMENSIONS` | unset | Optional output dimension sent to compatible providers. |
