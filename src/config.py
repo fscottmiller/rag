@@ -13,8 +13,11 @@ class Settings:
     embedding_api_key: str = field(default="", repr=False)
     embedding_timeout: float = 60.0
     embedding_dimensions: int | None = None
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "nomic-embed-text"
+    auth_mode: str = "none"
+    proxy_user_header: str = "Cf-Access-Authenticated-User-Email"
+    proxy_role_header: str = "X-Auth-Request-Role"
+    proxy_admin_role: str = "admin"
+    proxy_reader_role: str = "reader"
     chunker: str = "recursive"
     chunk_size: int = 512
     chunk_overlap: int = 64
@@ -26,13 +29,18 @@ class Settings:
         default_model = (
             "text-embedding-3-small"
             if normalized_provider in {"openai", "openai-compatible", "openai-compatible-api"}
-            else "all-MiniLM-L6-v2"
+            else "nomic-embed-text" if normalized_provider == "ollama" else "all-MiniLM-L6-v2"
+        )
+        default_url = (
+            "http://localhost:11434/v1/embeddings"
+            if normalized_provider == "ollama"
+            else "https://api.openai.com/v1/embeddings"
         )
         return cls(
             database_path=os.getenv("RAG_DATABASE_PATH", ":memory:"),
             embedding_provider=provider,
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL", default_model),
-            embedding_url=os.getenv("RAG_EMBEDDING_URL", "https://api.openai.com/v1/embeddings"),
+            embedding_url=os.getenv("RAG_EMBEDDING_URL", default_url),
             embedding_api_key=os.getenv("RAG_EMBEDDING_API_KEY", os.getenv("OPENAI_API_KEY", "")),
             embedding_timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT", "60")),
             embedding_dimensions=(
@@ -40,8 +48,13 @@ class Settings:
                 if os.getenv("RAG_EMBEDDING_DIMENSIONS")
                 else None
             ),
-            ollama_url=os.getenv("RAG_OLLAMA_URL", "http://localhost:11434"),
-            ollama_model=os.getenv("RAG_OLLAMA_MODEL", "nomic-embed-text"),
+            auth_mode=os.getenv("RAG_AUTH_MODE", "none"),
+            proxy_user_header=os.getenv(
+                "RAG_PROXY_USER_HEADER", "Cf-Access-Authenticated-User-Email"
+            ),
+            proxy_role_header=os.getenv("RAG_PROXY_ROLE_HEADER", "X-Auth-Request-Role"),
+            proxy_admin_role=os.getenv("RAG_PROXY_ADMIN_ROLE", "admin"),
+            proxy_reader_role=os.getenv("RAG_PROXY_READER_ROLE", "reader"),
             chunker=os.getenv("RAG_CHUNKER", "recursive"),
             chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "512")),
             chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "64")),

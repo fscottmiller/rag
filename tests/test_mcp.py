@@ -1,6 +1,16 @@
 import pytest
 
-from src.mcp_server.server import create_mcp
+from src.mcp_server.server import create_mcp, get_transport
+
+
+def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
+    monkeypatch.delenv("MCP_TRANSPORT", raising=False)
+    assert get_transport() == "stdio"
+    monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+    assert get_transport() == "streamable-http"
+    monkeypatch.setenv("MCP_TRANSPORT", "sse")
+    with pytest.raises(ValueError, match="stdio.*streamable-http"):
+        get_transport()
 
 
 @pytest.mark.asyncio

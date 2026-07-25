@@ -100,31 +100,9 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
 
 
-class OllamaEmbedder(BaseEmbedder):
-    def __init__(
-        self, model: str = "nomic-embed-text", url: str = "http://localhost:11434"
-    ) -> None:
-        self.model = model
-        self.url = url.rstrip("/")
-
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        result = []
-        for text in texts:
-            request = urllib.request.Request(
-                f"{self.url}/api/embeddings",
-                data=json.dumps({"model": self.model, "prompt": text}).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request) as response:
-                result.append(json.loads(response.read())["embedding"])
-        return result
-
-
 def create_embedder(
     provider: str,
     model: str,
-    ollama_url: str,
     embedding_url: str = "https://api.openai.com/v1/embeddings",
     embedding_api_key: str = "",
     embedding_timeout: float = 60.0,
@@ -133,9 +111,7 @@ def create_embedder(
     normalized = provider.lower().replace("_", "-")
     if normalized in {"sentence-transformers", "sentence-transformer", "transformers"}:
         return SentenceTransformerEmbedder(model)
-    if normalized == "ollama":
-        return OllamaEmbedder(model, ollama_url)
-    if normalized in {"openai", "openai-compatible", "openai-compatible-api"}:
+    if normalized in {"ollama", "openai", "openai-compatible", "openai-compatible-api"}:
         return OpenAICompatibleEmbedder(
             model,
             embedding_url,

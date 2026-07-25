@@ -23,7 +23,6 @@ class RAGService:
         self.embedder = embedder or create_embedder(
             self.settings.embedding_provider,
             self.settings.embedding_model,
-            self.settings.ollama_url,
             self.settings.embedding_url,
             self.settings.embedding_api_key,
             self.settings.embedding_timeout,

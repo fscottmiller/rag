@@ -36,9 +36,9 @@ Alternative: custom splitting would be smaller initially but would duplicate bou
 
 ### ADR-004: Pluggable embeddings
 
-`BaseEmbedder` is the stable boundary for embedding providers. Sentence Transformers using `all-MiniLM-L6-v2` is the default local provider. An OpenAI-compatible provider can be configured with an endpoint, model, optional dimensions, and API key through environment variables; Ollama remains an optional local provider. The selected embedding configuration is fixed for the service instance and is used for both ingestion and query execution.
+`BaseEmbedder` is the stable boundary for embedding providers. Sentence Transformers using `all-MiniLM-L6-v2` is the default local provider. OpenAI-compatible providers, including Ollama, use one endpoint/model/API key/timeout/dimensions configuration through `RAG_EMBEDDING_*`; Ollama defaults to its `/v1/embeddings` endpoint and `nomic-embed-text` model. The selected embedding configuration is fixed for the service instance and is used for both ingestion and query execution.
 
-Alternative: a hosted embedding API adds latency, credentials, and external availability requirements, but the OpenAI-compatible interface keeps the integration lightweight and works with multiple hosted or self-hosted compatible providers.
+Alternative: separate Ollama settings would duplicate the same protocol configuration and make provider switching harder.
 
 ### ADR-005: Shared service layer
 
@@ -58,6 +58,18 @@ This also makes index isolation explicit: one process owns one database file, an
 
 Alternative: collections inside one process would reduce the number of processes but would require collection-aware API and MCP contracts, routing, authorization, and configuration validation. That complexity is deferred unless the number of indexes makes process-per-index management impractical.
 
+### ADR-008: Explicit runtime authorization modes
+
+The default `none` mode keeps local development frictionless and grants every caller full CRUD and search access. `trusted-proxy` mode delegates authentication to a reverse proxy and maps its identity and role headers to exactly two roles: `admin` for all operations and `reader` for list/get/search only. The application rejects missing identities and unknown roles, but intentionally does not verify proxy credentials. Deployments must prevent direct access and strip client-supplied identity headers at the proxy boundary.
+
+Alternative: embedding authentication in this service would duplicate the proxy or Cloudflare Access identity provider and add credential lifecycle concerns outside the service's scope.
+
+### ADR-009: Stdio-first MCP transports
+
+MCP uses stdio by default for local clients. Streamable HTTP is an explicit opt-in for networked clients and proxy deployments. Legacy network transport support is not exposed by this adapter.
+
+Alternative: a network transport as the default would make local use less secure and less compatible with desktop MCP clients.
+
 ## Running
 
 ```bash
@@ -71,8 +83,9 @@ RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn src.api.main:app --
 RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn src.api.main:app --port 8002
 
 uv run python -m src.mcp_server.server
-MCP_TRANSPORT=sse uv run python -m src.mcp_server.server
+MCP_TRANSPORT=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp \
+  uv run python -m src.mcp_server.server
 uv run pytest
 ```
 
-The MCP process uses FastMCP's stdio transport by default. Set `MCP_TRANSPORT=sse` for SSE transport; the transport choice does not change service logic. Sentence Transformers is an optional dependency because its PyTorch runtime is large; Ollama remains available as an optional provider for deployments that already run a local Ollama model.
+The MCP process uses stdio by default and supports streamable HTTP as the only network transport. Sentence Transformers is an optional dependency because its PyTorch runtime is large. Ollama uses the same OpenAI-compatible embedding settings as other compatible providers. Set `RAG_AUTH_MODE=trusted-proxy` only when a reverse proxy authenticates requests and overwrites the configured identity and role headers; otherwise the default `none` mode grants full access to every caller.

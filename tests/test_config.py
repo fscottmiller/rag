@@ -21,11 +21,14 @@ def test_settings_read_all_environment_values(monkeypatch):
         "RAG_EMBEDDING_API_KEY": "test-key",
         "RAG_EMBEDDING_TIMEOUT": "12.5",
         "RAG_EMBEDDING_DIMENSIONS": "768",
-        "RAG_OLLAMA_URL": "http://ollama:11434",
-        "RAG_OLLAMA_MODEL": "custom-embed",
         "RAG_CHUNKER": "sentence",
         "RAG_CHUNK_SIZE": "128",
         "RAG_CHUNK_OVERLAP": "16",
+        "RAG_AUTH_MODE": "trusted-proxy",
+        "RAG_PROXY_USER_HEADER": "X-User",
+        "RAG_PROXY_ROLE_HEADER": "X-Role",
+        "RAG_PROXY_ADMIN_ROLE": "owner",
+        "RAG_PROXY_READER_ROLE": "viewer",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -38,12 +41,23 @@ def test_settings_read_all_environment_values(monkeypatch):
         embedding_api_key="test-key",
         embedding_timeout=12.5,
         embedding_dimensions=768,
-        ollama_url="http://ollama:11434",
-        ollama_model="custom-embed",
         chunker="sentence",
         chunk_size=128,
         chunk_overlap=16,
+        auth_mode="trusted-proxy",
+        proxy_user_header="X-User",
+        proxy_role_header="X-Role",
+        proxy_admin_role="owner",
+        proxy_reader_role="viewer",
     )
+
+
+def test_ollama_uses_common_openai_compatible_settings(monkeypatch):
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "ollama")
+    settings = Settings.from_env()
+    assert settings.embedding_model == "nomic-embed-text"
+    assert settings.embedding_url == "http://localhost:11434/v1/embeddings"
+    assert settings.embedding_api_key == ""
 
 
 def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypatch):
