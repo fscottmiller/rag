@@ -1,0 +1,2 @@
+"""Transient RAG MCP service."""
+
