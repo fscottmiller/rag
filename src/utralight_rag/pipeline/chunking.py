@@ -47,6 +47,16 @@ class ChonkieChunker(BaseChunker):
     def chunk(self, text: str) -> list[str]:
         if not text.strip():
             return []
-        return [
-            piece for piece in (_chunk_text(item) for item in self._chunker.chunk(text)) if piece
-        ]
+        results = self._chunker.chunk(text)
+        chunks = []
+        for item in results:
+            start = getattr(item, "start_index", None)
+            end = getattr(item, "end_index", None)
+            if self.strategy.lower() == "recursive" and self.chunk_overlap and start is not None:
+                piece = text[max(0, int(start) - self.chunk_overlap) : int(end)]
+            else:
+                piece = _chunk_text(item)
+            piece = piece.strip()
+            if piece:
+                chunks.append(piece)
+        return chunks

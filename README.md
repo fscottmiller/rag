@@ -95,7 +95,7 @@ When REST and MCP run as separate processes, set the same file-backed `RAG_DATAB
 
 ## Authentication and authorization
 
-The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and every caller can read, search, upload, update, and delete documents. Use this only on a trusted local network.
+The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. REST rejects cross-origin browser mutations even in open mode to prevent malicious webpages from posting to a local instance. Use this mode only on a trusted local network.
 
 For a deployment behind an authenticating reverse proxy or Cloudflare Access tunnel, set `RAG_AUTH_MODE=trusted-proxy`. The application trusts the proxy to authenticate the request and to overwrite the configured identity and role headers:
 
@@ -127,7 +127,9 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_EMBEDDING_DIMENSIONS` | unset | Optional output dimension sent to compatible providers. |
 | `RAG_CHUNKER` | `recursive` | Select `recursive`, `sentence`, or `token`. |
 | `RAG_CHUNK_SIZE` | `512` | Target chunk size. |
-| `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks. |
+| `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks; recursive chunking prepends the prior chunk's trailing characters. |
+| `RAG_MAX_DOCUMENT_BYTES` | `10485760` | Maximum document content size accepted by REST. |
+| `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
 | `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. |
 | `MCP_HOST` | `127.0.0.1` | Bind host for streamable HTTP. |
 | `MCP_PORT` | `8000` | Bind port for streamable HTTP. |

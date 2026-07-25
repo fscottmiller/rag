@@ -21,6 +21,14 @@ class Settings:
     chunker: str = "recursive"
     chunk_size: int = 512
     chunk_overlap: int = 64
+    max_document_bytes: int = 10 * 1024 * 1024
+    embedding_batch_size: int = 64
+
+    def __post_init__(self) -> None:
+        if self.max_document_bytes < 1:
+            raise ValueError("max_document_bytes must be positive")
+        if self.embedding_batch_size < 1:
+            raise ValueError("embedding_batch_size must be positive")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -63,4 +71,6 @@ class Settings:
             chunker=os.getenv("RAG_CHUNKER", "recursive"),
             chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "512")),
             chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "64")),
+            max_document_bytes=int(os.getenv("RAG_MAX_DOCUMENT_BYTES", str(10 * 1024 * 1024))),
+            embedding_batch_size=int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "64")),
         )

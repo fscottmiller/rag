@@ -16,6 +16,10 @@ from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
 
 
+class DocumentTooLargeError(ValueError):
+    """The request contains more document content than configured."""
+
+
 def create_app(service: RAGService | None = None) -> FastAPI:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
@@ -23,6 +27,13 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     app.state.rag = rag
 
     def require(request: Request, action: str) -> None:
+        if action == "write" and authorizer.mode == "none":
+            origin = request.headers.get("origin")
+            request_origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
+            if origin and origin != request_origin:
+                raise HTTPException(
+                    status_code=403, detail="Cross-origin document mutations are not allowed"
+                )
         try:
             authorizer.authorize(request.headers, action)
         except AuthenticationError as exc:
@@ -35,6 +46,8 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         require(request, "write")
         try:
             payload = await _read_document_request(request)
+        except DocumentTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except (ValidationError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
@@ -87,16 +100,33 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
 
 async def _read_document_request(request: Request) -> dict[str, Any]:
+    max_bytes = request.app.state.rag.settings.max_document_bytes
     content_type = request.headers.get("content-type", "")
+    content_length = request.headers.get("content-length")
+    if (
+        content_length
+        and not content_type.startswith("multipart/form-data")
+        and int(content_length) > max_bytes
+    ):
+        raise DocumentTooLargeError(f"document request exceeds {max_bytes} bytes")
+
     if content_type.startswith("application/json"):
-        return DocumentPayload.model_validate(await request.json()).model_dump()
+        payload = DocumentPayload.model_validate(await request.json()).model_dump()
+        if len(payload["content"].encode("utf-8")) > max_bytes:
+            raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
+        return payload
     form = await request.form()
     upload = form.get("file")
     if isinstance(upload, UploadFile):
-        content = (await upload.read()).decode("utf-8")
+        content_bytes = await upload.read(max_bytes + 1)
+        if len(content_bytes) > max_bytes:
+            raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
+        content = content_bytes.decode("utf-8")
         title = str(form.get("title") or upload.filename or "untitled")
     else:
         content = str(form.get("content") or "")
+        if len(content.encode("utf-8")) > max_bytes:
+            raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
         title = str(form.get("title") or "untitled")
     metadata: Any = form.get("metadata", {})
     if isinstance(metadata, str):

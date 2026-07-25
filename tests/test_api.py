@@ -47,6 +47,37 @@ def test_rest_file_upload(service):
     assert response.json()["metadata"] == {"source": "file"}
 
 
+def test_rest_rejects_cross_origin_mutations_in_open_mode(service):
+    client = TestClient(create_app(service))
+    response = client.post(
+        "/documents",
+        data={"title": "Injected", "content": "cross-origin"},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert response.status_code == 403
+    assert service.list_documents() == []
+
+
+def test_rest_rejects_documents_over_configured_limit(service):
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)
+    )
+    client = TestClient(create_app(limited))
+
+    response = client.post("/documents", json={"title": "Large", "content": "123456789"})
+    assert response.status_code == 413
+
+
+def test_rest_rejects_large_file_upload(service):
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)
+    )
+    client = TestClient(create_app(limited))
+
+    response = client.post("/documents", files={"file": ("large.txt", b"123456789", "text/plain")})
+    assert response.status_code == 413
+
+
 def test_rest_not_found_and_validation_errors(service):
     client = TestClient(create_app(service))
     missing = "missing-document"

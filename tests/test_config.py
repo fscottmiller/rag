@@ -10,6 +10,8 @@ def test_settings_defaults_are_in_memory_and_local():
     assert settings.chunker == "recursive"
     assert settings.chunk_size == 512
     assert settings.chunk_overlap == 64
+    assert settings.max_document_bytes == 10 * 1024 * 1024
+    assert settings.embedding_batch_size == 64
 
 
 def test_settings_read_all_environment_values(monkeypatch):
@@ -24,6 +26,8 @@ def test_settings_read_all_environment_values(monkeypatch):
         "RAG_CHUNKER": "sentence",
         "RAG_CHUNK_SIZE": "128",
         "RAG_CHUNK_OVERLAP": "16",
+        "RAG_MAX_DOCUMENT_BYTES": "2048",
+        "RAG_EMBEDDING_BATCH_SIZE": "8",
         "RAG_AUTH_MODE": "trusted-proxy",
         "RAG_PROXY_USER_HEADER": "X-User",
         "RAG_PROXY_ROLE_HEADER": "X-Role",
@@ -44,6 +48,8 @@ def test_settings_read_all_environment_values(monkeypatch):
         chunker="sentence",
         chunk_size=128,
         chunk_overlap=16,
+        max_document_bytes=2048,
+        embedding_batch_size=8,
         auth_mode="trusted-proxy",
         proxy_user_header="X-User",
         proxy_role_header="X-Role",
@@ -69,6 +75,13 @@ def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypa
     assert settings.embedding_url == "https://api.openai.com/v1/embeddings"
     assert settings.embedding_api_key == "fallback-key"
     assert "fallback-key" not in repr(settings)
+
+
+def test_settings_reject_non_positive_limits():
+    with pytest.raises(ValueError, match="max_document_bytes"):
+        Settings(max_document_bytes=0)
+    with pytest.raises(ValueError, match="embedding_batch_size"):
+        Settings(embedding_batch_size=0)
 
 
 def test_settings_reject_non_integer_chunk_configuration(monkeypatch):

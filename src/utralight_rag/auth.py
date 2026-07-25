@@ -30,10 +30,17 @@ class Authorizer:
         if mode not in {"none", "trusted-proxy"}:
             raise ValueError("RAG_AUTH_MODE must be 'none' or 'trusted-proxy'")
         self.mode = mode
-        self.user_header = settings.proxy_user_header
-        self.role_header = settings.proxy_role_header
-        self.admin_role = settings.proxy_admin_role
-        self.reader_role = settings.proxy_reader_role
+        self.user_header = settings.proxy_user_header.strip()
+        self.role_header = settings.proxy_role_header.strip()
+        self.admin_role = settings.proxy_admin_role.strip()
+        self.reader_role = settings.proxy_reader_role.strip()
+        if self.mode == "trusted-proxy":
+            if not self.user_header or not self.role_header:
+                raise ValueError("Trusted proxy headers must not be empty")
+            if not self.admin_role or not self.reader_role:
+                raise ValueError("Trusted proxy roles must not be empty")
+            if self.admin_role == self.reader_role:
+                raise ValueError("Trusted proxy admin and reader roles must be distinct")
 
     def authorize(self, headers: Mapping[str, str], action: str) -> Principal:
         if self.mode == "none":
