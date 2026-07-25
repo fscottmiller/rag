@@ -19,7 +19,7 @@ from .models import DocumentPayload, SearchPayload
 def create_app(service: RAGService | None = None) -> FastAPI:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
-    app = FastAPI(title="Transient RAG MCP", version="0.1.0")
+    app = FastAPI(title="Utralight RAG MCP", version="0.1.0")
     app.state.rag = rag
 
     def require(request: Request, action: str) -> None:

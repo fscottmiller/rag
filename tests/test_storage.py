@@ -1,6 +1,6 @@
 import pytest
 
-from transient_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 def vector_rows(store: SQLiteStore) -> int:

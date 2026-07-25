@@ -1,9 +1,9 @@
 import pytest
 
-from transient_rag.config import Settings
+from utralight_rag.config import Settings
 
 
-def test_settings_defaults_are_transient_and_local():
+def test_settings_defaults_are_in_memory_and_local():
     settings = Settings()
     assert settings.database_path == ":memory:"
     assert settings.embedding_provider == "sentence-transformers"

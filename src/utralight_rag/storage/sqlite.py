@@ -272,7 +272,7 @@ class SQLiteStore:
         if len(vector) != self._vector_dimension:
             raise ValueError("Search embedding dimension does not match indexed embeddings")
         if filter_metadata:
-            # Metadata filtering happens after the KNN query, which is adequate at transient scale.
+            # Metadata filtering happens after KNN, adequate for small local indexes.
             candidate_count = max(1, self._chunk_count_all())
         else:
             candidate_count = max(top_k * 10, 50)
