@@ -2197,7 +2197,7 @@ dev = [
 requires-dist = [
     { name = "chonkie", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "mcp", specifier = ">=1.9.0" },
+    { name = "mcp", specifier = ">=1.27,<2" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "sentence-transformers", marker = "extra == 'local-embeddings'", specifier = ">=3.4.0" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },

@@ -49,7 +49,7 @@ Use a separate database path and port for every instance. This keeps vector spac
 Create a document:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/documents \
+curl -X POST http://127.0.0.1:8001/documents \
   -H 'content-type: application/json' \
   -d '{"title":"Notes","content":"Useful context","metadata":{"source":"manual"}}'
 ```
@@ -57,7 +57,7 @@ curl -X POST http://127.0.0.1:8000/documents \
 Search the index:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/search \
+curl -X POST http://127.0.0.1:8001/search \
   -H 'content-type: application/json' \
   -d '{"query":"useful context","top_k":5}'
 ```

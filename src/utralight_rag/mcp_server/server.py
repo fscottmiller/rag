@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from ..auth import Authorizer
 from ..service import RAGService
@@ -21,7 +22,10 @@ def get_transport() -> str:
 
 
 def create_mcp(
-    service: RAGService | None = None, *, streamable_http_path: str | None = None
+    service: RAGService | None = None,
+    *,
+    streamable_http_path: str | None = None,
+    transport_security: TransportSecuritySettings | None = None,
 ) -> FastMCP:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
@@ -30,6 +34,7 @@ def create_mcp(
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
         streamable_http_path=streamable_http_path or os.getenv("MCP_PATH", "/mcp"),
+        transport_security=transport_security,
     )
 
     def authorize(ctx: Context, action: str) -> None:

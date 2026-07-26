@@ -57,7 +57,7 @@ class BodySizeLimitMiddleware:
         async def replay() -> dict[str, Any]:
             nonlocal sent
             if sent:
-                return {"type": "http.disconnect"}
+                return await receive()
             sent = True
             return {"type": "http.request", "body": bytes(body), "more_body": False}
 
