@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 
 class BaseEmbedder(ABC):
@@ -52,6 +53,10 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise ValueError("embedding model must not be empty")
         if not url.strip():
             raise ValueError("embedding URL must not be empty")
+        url = url.strip()
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise ValueError("embedding URL must use an http or https scheme")
         if timeout <= 0:
             raise ValueError("embedding timeout must be positive")
         if dimensions is not None and dimensions < 1:
