@@ -178,6 +178,9 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         parsed_url = urlparse(url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise ValueError("embedding URL must use an http or https scheme")
+        self.provider = canonical_provider(provider)
+        if self.provider == "openai-compatible" and parsed_url.scheme != "https":
+            raise ValueError("external embedding URL must use https")
         if "@" in parsed_url.netloc or _has_query_credentials(parsed_url.query):
             raise ValueError("embedding URL must not contain credentials; use embedding API key")
         if timeout <= 0:
@@ -192,7 +195,6 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         self.timeout = timeout
         self.dimensions = dimensions
         self.batch_size = batch_size
-        self.provider = canonical_provider(provider)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         inputs = list(texts)
