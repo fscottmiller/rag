@@ -23,6 +23,13 @@ RAG_EMBEDDING_API_KEY="$OPENAI_API_KEY" \
 uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
+Sentence Transformers remains an optional legacy local provider; install its extra before selecting it, since its PyTorch runtime is not part of the base install:
+
+```bash
+uv sync --extra local-embeddings
+RAG_EMBEDDING_PROVIDER=sentence-transformers uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+```
+
 Ollama uses the same OpenAI-compatible protocol and settings; there are no separate Ollama variables:
 
 ```bash
@@ -39,8 +46,8 @@ Open the interactive API documentation at <http://127.0.0.1:8001/docs>.
 Each running service instance owns one index, one SQLite database, and one embedding/chunking configuration. Run separate instances for independent indexes rather than configuring collections inside one process:
 
 ```bash
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.api.main:app --port 8001
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.api.main:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.combined:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.combined:app --port 8002
 ```
 
 Use a separate database path and port for every instance. This keeps vector spaces, chunking behavior, and lifecycle management isolated.
@@ -118,7 +125,7 @@ RAG_PROXY_USER_HEADER=Cf-Access-Authenticated-User-Email \
 RAG_PROXY_ROLE_HEADER=X-Auth-Request-Role \
 RAG_PROXY_ADMIN_ROLE=admin \
 RAG_PROXY_READER_ROLE=reader \
-uv run uvicorn utralight_rag.api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.
@@ -145,10 +152,10 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_MAX_REQUEST_BYTES` | `10551296` | Maximum raw HTTP request body accepted before parsing; keep this at or above the document limit to allow request overhead. |
 | `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
 | `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
-| `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. |
-| `MCP_HOST` | `127.0.0.1` | Bind host for streamable HTTP. |
-| `MCP_PORT` | `8000` | Bind port for streamable HTTP. |
-| `MCP_PATH` | `/mcp` | Streamable HTTP path. |
+| `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. Only used by the standalone `utralight_rag.mcp_server.server` process, not the combined app. |
+| `MCP_HOST` | `127.0.0.1` | Bind host for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--host` instead. |
+| `MCP_PORT` | `8000` | Bind port for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--port` instead. |
+| `MCP_PATH` | `/mcp` | Streamable HTTP path, used by both the standalone MCP server and the combined app's MCP mount. |
 | `RAG_AUTH_MODE` | `none` | Select `none` or `trusted-proxy`. |
 | `RAG_PROXY_USER_HEADER` | `Cf-Access-Authenticated-User-Email` | Trusted proxy header containing the authenticated identity. |
 | `RAG_PROXY_ROLE_HEADER` | `X-Auth-Request-Role` | Trusted proxy header containing `admin` or `reader`. |

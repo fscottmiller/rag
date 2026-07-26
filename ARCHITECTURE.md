@@ -23,7 +23,7 @@ The vector table uses cosine distance so the returned `score` remains an interpr
 
 ### ADR-001: Python 3.11+
 
-Python 3.11 is the minimum supported version because it provides modern typing and good support across FastAPI, FastMCP, Chonkie, and sentence-transformers. The project is managed with `uv` and uses `pyproject.toml` plus `uv.lock` for reproducible environments.
+Python 3.11 is the minimum supported version because it provides modern typing and good support across FastAPI, FastMCP, Chonkie, FastEmbed, and sentence-transformers. Python is capped at `<3.14` because FastEmbed's `onnxruntime` dependency does not yet publish wheels for newer versions. The project is managed with `uv` and uses `pyproject.toml` plus `uv.lock` for reproducible environments.
 
 Alternative: older Python versions would increase compatibility burden and are not needed for this service.
 
@@ -66,6 +66,8 @@ Alternative: collections inside one process would reduce the number of processes
 ### ADR-008: Explicit runtime authorization modes
 
 The default `none` mode keeps local development frictionless and grants non-browser callers full CRUD and search access. REST rejects cross-origin browser mutations even in this mode, preventing a malicious webpage from posting to a local instance. A trusted-host allowlist also rejects DNS-rebinding requests before routing, so the client-controlled Host header is never used as the security decision. `trusted-proxy` mode delegates authentication to a reverse proxy and maps its identity and role headers to exactly two roles: `admin` for all operations and `reader` for list/get/search only. Header names and role values must be non-empty, and the two configured roles must be distinct. The application rejects missing identities and unknown roles, but intentionally does not verify proxy credentials. Deployments must prevent direct access and strip client-supplied identity headers at the proxy boundary.
+
+The combined app's MCP mount gets the same cross-origin protection through a dedicated `MCPOriginMiddleware` rather than the MCP library's built-in DNS-rebinding guard: `combined.py` disables that guard (`enable_dns_rebinding_protection=False`) because the SDK's implementation only understands standalone deployments, and instead rejects any browser request whose `Origin` header does not match the request's own scheme/host/port, the same check REST uses. `TrustedHostMiddleware` still validates the Host header for both adapters ahead of this check.
 
 Alternative: embedding authentication in this service would duplicate the proxy or Cloudflare Access identity provider and add credential lifecycle concerns outside the service's scope.
 
