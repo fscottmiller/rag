@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import Lifespan
 
 from ..auth import AuthenticationError, AuthorizationError, Authorizer
 from ..service import DocumentTooLargeError, RAGService
@@ -74,10 +75,12 @@ class BodySizeLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-def create_app(service: RAGService | None = None) -> FastAPI:
+def create_app(
+    service: RAGService | None = None, lifespan: Lifespan[FastAPI] | None = None
+) -> FastAPI:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
-    app = FastAPI(title="Utralight RAG MCP", version="0.1.0")
+    app = FastAPI(title="Utralight RAG MCP", version="0.1.0", lifespan=lifespan)
     app.state.rag = rag
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=rag.settings.max_request_bytes)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(rag.settings.trusted_hosts))
