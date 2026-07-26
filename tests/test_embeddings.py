@@ -1,5 +1,6 @@
 import json
 import threading
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -65,7 +66,9 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
                 self.send_response(503)
                 self.end_headers()
                 return
-            if self.path == "/invalid-json":
+            elif self.path == "/too-large":
+                body = b"xxxx"
+            elif self.path == "/invalid-json":
                 body = b"{not-json"
             elif self.path == "/bad":
                 body = json.dumps({"data": []}).encode()
@@ -145,6 +148,10 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
             OpenAICompatibleEmbedder("model", f"{base_url}/bad").embed(["one"])
         with pytest.raises(RuntimeError, match="HTTP 503"):
             OpenAICompatibleEmbedder("model", f"{base_url}/http-error").embed(["one"])
+        too_large = OpenAICompatibleEmbedder("model", f"{base_url}/too-large")
+        too_large.max_response_bytes = 3
+        with pytest.raises(RuntimeError, match="exceeds size limit"):
+            too_large.embed(["one"])
         with pytest.raises(RuntimeError, match="invalid JSON"):
             OpenAICompatibleEmbedder("model", f"{base_url}/invalid-json").embed(["one"])
         with pytest.raises(RuntimeError, match="invalid embeddings"):
@@ -190,3 +197,22 @@ def test_openai_compatible_embedder_rejects_non_http_urls():
         OpenAICompatibleEmbedder("model", "file:///tmp/embeddings")
     with pytest.raises(ValueError, match="http or https"):
         OpenAICompatibleEmbedder("model", "ftp://embedding.example/v1/embeddings")
+
+
+def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
+    class ErrorBody:
+        def read(self, size):
+            assert size == 4
+            return b"error"
+
+        def close(self):
+            pass
+
+    def urlopen(*_args, **_kwargs):
+        raise urllib.error.HTTPError("http://embedding.test", 503, "Unavailable", {}, ErrorBody())
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    embedder = OpenAICompatibleEmbedder("model", "http://embedding.test")
+    embedder.max_response_bytes = 3
+    with pytest.raises(RuntimeError, match="HTTP 503: error"):
+        embedder.embed(["one"])

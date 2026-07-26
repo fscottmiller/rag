@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
@@ -16,6 +17,30 @@ from ..auth import AuthenticationError, AuthorizationError, Authorizer
 from ..service import DocumentTooLargeError, RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
+
+
+def _same_origin(origin: str, request: Request) -> bool:
+    try:
+        parsed = urlsplit(origin)
+        origin_port = (
+            parsed.port
+            if parsed.port is not None
+            else {"http": 80, "https": 443}.get(parsed.scheme)
+        )
+    except ValueError:
+        return False
+    if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return False
+    request_port = (
+        request.url.port
+        if request.url.port is not None
+        else {"http": 80, "https": 443}.get(request.url.scheme)
+    )
+    return (parsed.scheme, parsed.hostname, origin_port) == (
+        request.url.scheme,
+        request.url.hostname,
+        request_port,
+    )
 
 
 class BodySizeLimitMiddleware:
@@ -88,11 +113,12 @@ def create_app(
     def require(request: Request, action: str) -> None:
         if action == "write" and authorizer.mode == "none":
             origin = request.headers.get("origin")
-            request_origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
-            if origin and origin != request_origin:
-                raise HTTPException(
-                    status_code=403, detail="Cross-origin document mutations are not allowed"
-                )
+            if origin:
+                if not _same_origin(origin, request):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Cross-origin document mutations are not allowed",
+                    )
         try:
             authorizer.authorize(request.headers, action)
         except AuthenticationError as exc:
@@ -198,4 +224,17 @@ async def _read_document_request(request: Request) -> dict[str, Any]:
     return DocumentPayload.model_validate(payload).model_dump()
 
 
-app = create_app()
+_default_app: FastAPI | None = None
+
+
+def get_app() -> FastAPI:
+    global _default_app
+    if _default_app is None:
+        _default_app = create_app()
+    return _default_app
+
+
+def __getattr__(name: str) -> Any:
+    if name == "app":
+        return get_app()
+    raise AttributeError(name)

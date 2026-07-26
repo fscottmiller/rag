@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import anyio
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from ..auth import Authorizer
 from ..service import RAGService
+from ..storage.sqlite import DocumentNotFoundError
 
 _ALLOWED_TRANSPORTS = {"stdio", "streamable-http"}
 
@@ -46,7 +48,7 @@ def create_mcp(
         authorizer.authorize(headers, action)
 
     @server.tool()
-    def rag_search(
+    async def rag_search(
         query: str,
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
@@ -55,22 +57,25 @@ def create_mcp(
     ) -> list[dict[str, Any]]:
         """Search indexed chunks by semantic similarity."""
         authorize(ctx, "read")
-        return rag.search(query, top_k, filter_metadata)
+        return await anyio.to_thread.run_sync(rag.search, query, top_k, filter_metadata)
 
     @server.tool()
-    def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
+    async def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
         """List documents currently held in the index."""
         authorize(ctx, "read")
-        return rag.list_documents()
+        return await anyio.to_thread.run_sync(rag.list_documents)
 
     @server.tool()
-    def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
+    async def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
         """Retrieve one document, metadata, and its chunks."""
         authorize(ctx, "read")
-        return rag.get_document(document_id)
+        try:
+            return await anyio.to_thread.run_sync(rag.get_document, document_id)
+        except DocumentNotFoundError:
+            raise ValueError(f"Document not found: {document_id}") from None
 
     @server.tool()
-    def upload_document(
+    async def upload_document(
         title: str,
         content: str,
         metadata: dict[str, Any] | None = None,
@@ -79,13 +84,16 @@ def create_mcp(
     ) -> dict[str, Any]:
         """Ingest a document directly into the index."""
         authorize(ctx, "write")
-        return rag.ingest(title, content, metadata)
+        return await anyio.to_thread.run_sync(rag.ingest, title, content, metadata)
 
     @server.tool()
-    def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
+    async def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
         """Delete a document and all of its indexed chunks."""
         authorize(ctx, "write")
-        rag.delete_document(document_id)
+        try:
+            await anyio.to_thread.run_sync(rag.delete_document, document_id)
+        except DocumentNotFoundError:
+            raise ValueError(f"Document not found: {document_id}") from None
         return {"status": "deleted", "document_id": document_id}
 
     return server

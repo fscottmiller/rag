@@ -38,6 +38,8 @@ class SentenceTransformerEmbedder(BaseEmbedder):
 class OpenAICompatibleEmbedder(BaseEmbedder):
     """Embed text through an OpenAI-compatible /v1/embeddings endpoint."""
 
+    max_response_bytes = 64 * 1024 * 1024
+
     def __init__(
         self,
         model: str,
@@ -96,13 +98,13 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             method="POST",
         )
         try:
-            # The constructor restricts this operator-configured URL to HTTP(S).
-            with urllib.request.urlopen(  # nosec B310
-                request, timeout=self.timeout
-            ) as response:
-                body = json.loads(response.read())
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read(self.max_response_bytes + 1)
+                if len(raw) > self.max_response_bytes:
+                    raise RuntimeError("Embedding endpoint response exceeds size limit")
+                body = json.loads(raw)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            detail = exc.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:500]
             raise RuntimeError(f"Embedding endpoint returned HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(f"Embedding endpoint request failed: {exc}") from exc
