@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from utralight_rag.api.main import BodySizeLimitMiddleware, create_app
@@ -80,6 +81,18 @@ def test_rest_rejects_same_host_with_different_scheme(service):
     assert service.list_documents() == []
 
 
+@pytest.mark.parametrize("origin", ["https://user@testserver", "https://testserver:bad"])
+def test_rest_rejects_malformed_origin(service, origin):
+    with TestClient(create_app(service), base_url="https://testserver") as client:
+        response = client.post(
+            "/documents",
+            json={"title": "Injected", "content": "malformed-origin"},
+            headers={"Origin": origin},
+        )
+    assert response.status_code == 403
+    assert service.list_documents() == []
+
+
 def test_rest_rejects_documents_over_configured_limit(service):
     limited = RAGService(
         SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)
@@ -139,6 +152,21 @@ async def test_body_size_limit_rejects_chunked_body_before_parsing():
     )
 
     assert not called
+    assert sent[0]["status"] == 413
+
+
+async def test_body_size_limit_rejects_invalid_content_length():
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    await BodySizeLimitMiddleware(None, max_bytes=4)(
+        {"type": "http", "headers": [(b"content-length", b"invalid")]},
+        None,
+        send,
+    )
+
     assert sent[0]["status"] == 413
 
 

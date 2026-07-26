@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
+from mcp.server.fastmcp.exceptions import ToolError
 
 from utralight_rag.combined import create_combined_app
 from utralight_rag.mcp_server.server import create_mcp, get_transport
@@ -47,6 +48,10 @@ async def test_mcp_tools_share_service_lifecycle(service):
 
     _, deleted = await server.call_tool("delete_document", {"document_id": document_id})
     assert deleted == {"status": "deleted", "document_id": document_id}
+    with pytest.raises(ToolError, match="Document not found"):
+        await server.call_tool("get_document", {"document_id": document_id})
+    with pytest.raises(ToolError, match="Document not found"):
+        await server.call_tool("delete_document", {"document_id": document_id})
     _, listed = await server.call_tool("list_documents", {})
     assert listed["result"] == []
 
@@ -147,10 +152,36 @@ def test_mcp_rejects_untrusted_origin_for_wildcard_host(service):
         service.chunker,
         replace(service.settings, trusted_hosts=("*.example.com",)),
     )
-    with TestClient(create_combined_app(public_service), base_url="https://mcp.example.com") as client:
+    with TestClient(
+        create_combined_app(public_service), base_url="https://mcp.example.com"
+    ) as client:
         response = client.post(
             "/mcp",
             json={},
             headers={"accept": "application/json", "origin": "https://evil.example"},
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://mcp.example.com",
+        "https://mcp.example.com:444",
+        "https://sibling.example.com",
+    ],
+)
+def test_mcp_rejects_cross_origin_for_wildcard_host(service, origin):
+    public_service = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, trusted_hosts=("*.example.com",)),
+    )
+    with TestClient(
+        create_combined_app(public_service), base_url="https://mcp.example.com"
+    ) as client:
+        response = client.post(
+            "/mcp", json={}, headers={"accept": "application/json", "origin": origin}
         )
     assert response.status_code == 403

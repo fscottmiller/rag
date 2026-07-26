@@ -104,7 +104,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
                     raise RuntimeError("Embedding endpoint response exceeds size limit")
                 body = json.loads(raw)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            detail = exc.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:500]
             raise RuntimeError(f"Embedding endpoint returned HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(f"Embedding endpoint request failed: {exc}") from exc
