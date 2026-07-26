@@ -81,6 +81,17 @@ def test_rest_rejects_same_host_with_different_scheme(service):
     assert service.list_documents() == []
 
 
+def test_rest_rejects_explicit_port_zero_origin(service):
+    with TestClient(create_app(service), base_url="https://testserver") as client:
+        response = client.post(
+            "/documents",
+            json={"title": "Injected", "content": "cross-port"},
+            headers={"Origin": "https://testserver:0"},
+        )
+    assert response.status_code == 403
+    assert service.list_documents() == []
+
+
 @pytest.mark.parametrize(
     "origin", ["https://user@testserver", "https://testserver:bad", "https://["]
 )

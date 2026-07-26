@@ -60,17 +60,17 @@ def create_mcp(
         return await anyio.to_thread.run_sync(rag.search, query, top_k, filter_metadata)
 
     @server.tool()
-    def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
+    async def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
         """List documents currently held in the index."""
         authorize(ctx, "read")
-        return rag.list_documents()
+        return await anyio.to_thread.run_sync(rag.list_documents)
 
     @server.tool()
-    def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
+    async def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
         """Retrieve one document, metadata, and its chunks."""
         authorize(ctx, "read")
         try:
-            return rag.get_document(document_id)
+            return await anyio.to_thread.run_sync(rag.get_document, document_id)
         except DocumentNotFoundError:
             raise ValueError(f"Document not found: {document_id}") from None
 
@@ -87,11 +87,11 @@ def create_mcp(
         return await anyio.to_thread.run_sync(rag.ingest, title, content, metadata)
 
     @server.tool()
-    def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
+    async def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
         """Delete a document and all of its indexed chunks."""
         authorize(ctx, "write")
         try:
-            rag.delete_document(document_id)
+            await anyio.to_thread.run_sync(rag.delete_document, document_id)
         except DocumentNotFoundError:
             raise ValueError(f"Document not found: {document_id}") from None
         return {"status": "deleted", "document_id": document_id}

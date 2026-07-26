@@ -19,6 +19,15 @@ def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeyp
         get_transport()
 
 
+def test_combined_import_does_not_create_an_unused_rest_app():
+    import utralight_rag.api as api
+    import utralight_rag.api.main as api_main
+
+    assert api_main._default_app is None
+    assert api_main.app is api_main.get_app()
+    assert api.app is api_main.get_app()
+
+
 @pytest.mark.asyncio
 async def test_mcp_tools_share_service_lifecycle(service):
     server = create_mcp(service)
@@ -54,6 +63,28 @@ async def test_mcp_tools_share_service_lifecycle(service):
         await server.call_tool("delete_document", {"document_id": document_id})
     _, listed = await server.call_tool("list_documents", {})
     assert listed["result"] == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_document_tools_offload_storage_calls(service, monkeypatch):
+    document = service.ingest("MCP guide", "Python context")
+    calls = []
+
+    async def run_sync(function, *args):
+        calls.append((function, args))
+        return function(*args)
+
+    monkeypatch.setattr("utralight_rag.mcp_server.server.anyio.to_thread.run_sync", run_sync)
+    server = create_mcp(service)
+    await server.call_tool("list_documents", {})
+    await server.call_tool("get_document", {"document_id": document["id"]})
+    await server.call_tool("delete_document", {"document_id": document["id"]})
+
+    assert calls == [
+        (service.list_documents, ()),
+        (service.get_document, (document["id"],)),
+        (service.delete_document, (document["id"],)),
+    ]
 
 
 def test_combined_app_mounts_streamable_http_over_the_same_service(service):

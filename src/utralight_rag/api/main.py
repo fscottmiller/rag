@@ -22,12 +22,20 @@ from .models import DocumentPayload, SearchPayload
 def _same_origin(origin: str, request: Request) -> bool:
     try:
         parsed = urlsplit(origin)
-        origin_port = parsed.port or {"http": 80, "https": 443}.get(parsed.scheme)
+        origin_port = (
+            parsed.port
+            if parsed.port is not None
+            else {"http": 80, "https": 443}.get(parsed.scheme)
+        )
     except ValueError:
         return False
     if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         return False
-    request_port = request.url.port or {"http": 80, "https": 443}.get(request.url.scheme)
+    request_port = (
+        request.url.port
+        if request.url.port is not None
+        else {"http": 80, "https": 443}.get(request.url.scheme)
+    )
     return (parsed.scheme, parsed.hostname, origin_port) == (
         request.url.scheme,
         request.url.hostname,
@@ -216,4 +224,17 @@ async def _read_document_request(request: Request) -> dict[str, Any]:
     return DocumentPayload.model_validate(payload).model_dump()
 
 
-app = create_app()
+_default_app: FastAPI | None = None
+
+
+def get_app() -> FastAPI:
+    global _default_app
+    if _default_app is None:
+        _default_app = create_app()
+    return _default_app
+
+
+def __getattr__(name: str) -> Any:
+    if name == "app":
+        return get_app()
+    raise AttributeError(name)
