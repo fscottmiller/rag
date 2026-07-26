@@ -67,6 +67,28 @@ def test_replace_and_delete_remove_old_vectors():
     store.close()
 
 
+def test_empty_index_identity_replacement_drops_old_vector_schema(tmp_path):
+    database = tmp_path / "index.sqlite3"
+    first = SQLiteStore(str(database))
+    first.ensure_embedding_configuration("fastembed", "first", "first")
+    document = first.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.delete_document(document["id"])
+    first.ensure_embedding_configuration("fastembed", "second", "second")
+    first.create_document("Second", "text", {}, ["text"], [[1.0, 0.0]])
+    assert first.search([1.0, 0.0], 1)[0]["title"] == "Second"
+    first.close()
+
+
+def test_replace_and_delete_preserve_not_found_contract_for_empty_documents():
+    store = SQLiteStore()
+    store.create_document("Empty", "", {}, [], [], document_id="empty")
+    store.replace_document("empty", "Still empty", "", {}, [], [])
+    store.delete_document("empty")
+    with pytest.raises(DocumentNotFoundError):
+        store.replace_document("missing", "Missing", "", {}, [], [])
+    store.close()
+
+
 def test_search_refreshes_vector_dimension_for_late_writer(tmp_path):
     database = tmp_path / "shared.sqlite3"
     reader = SQLiteStore(str(database))
@@ -91,6 +113,9 @@ def test_storage_rejects_mismatched_or_empty_embeddings():
         store.create_document("Bad", "text", {}, ["one"], [[float("nan")]])
     with pytest.raises(ValueError, match="finite"):
         store.create_document("Bad", "text", {}, ["one"], [["not-a-number"]])
+    for value in (True, "1.0"):
+        with pytest.raises(ValueError, match="finite"):
+            store.create_document("Bad", "text", {}, ["one"], [[value]])
     store.close()
 
 
@@ -134,4 +159,20 @@ def test_search_rejects_wrong_embedding_dimension_and_empty_index_filter():
         store.search([1.0], 1)
     store.delete_document(created["id"])
     assert store.search([1.0, 0.0], 1, {"group": "none"}) == []
+    store.close()
+
+
+@pytest.mark.parametrize("vector", [[float("nan")], [float("inf")], [True], ["1.0"]])
+def test_search_rejects_invalid_embedding_coordinates(vector):
+    store = SQLiteStore()
+    with pytest.raises(ValueError, match="finite"):
+        store.search(vector, 1)
+    store.close()
+
+
+@pytest.mark.parametrize("top_k", [0, -1, True, 1.5, 101, 10**100])
+def test_search_rejects_non_positive_or_non_integer_top_k(top_k):
+    store = SQLiteStore()
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        store.search([1.0], top_k)
     store.close()

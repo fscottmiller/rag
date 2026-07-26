@@ -10,8 +10,8 @@ DEFAULT_MAX_REQUEST_BYTES = DEFAULT_MAX_DOCUMENT_BYTES + 64 * 1024
 @dataclass(frozen=True)
 class Settings:
     database_path: str = ":memory:"
-    embedding_provider: str = "sentence-transformers"
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_provider: str = "fastembed"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_url: str = "https://api.openai.com/v1/embeddings"
     embedding_api_key: str = field(default="", repr=False)
     embedding_timeout: float = 60.0
@@ -43,13 +43,27 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        provider = os.getenv("RAG_EMBEDDING_PROVIDER", "sentence-transformers")
+        provider = os.getenv("RAG_EMBEDDING_PROVIDER")
+        configured_api_key = os.getenv("RAG_EMBEDDING_API_KEY", "").strip()
+        if provider is None:
+            api_key = configured_api_key or os.getenv("OPENAI_API_KEY", "").strip()
+            provider = "openai-compatible" if api_key else "fastembed"
+        else:
+            normalized_explicit_provider = provider.lower().replace("_", "-")
+            api_key = configured_api_key or (
+                os.getenv("OPENAI_API_KEY", "").strip()
+                if normalized_explicit_provider
+                in {"openai", "openai-compatible", "openai-compatible-api"}
+                else ""
+            )
         normalized_provider = provider.lower().replace("_", "-")
         default_model = (
             "text-embedding-3-small"
             if normalized_provider in {"openai", "openai-compatible", "openai-compatible-api"}
             else "nomic-embed-text"
             if normalized_provider == "ollama"
+            else "BAAI/bge-small-en-v1.5"
+            if normalized_provider == "fastembed"
             else "all-MiniLM-L6-v2"
         )
         default_url = (
@@ -62,10 +76,7 @@ class Settings:
             embedding_provider=provider,
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL", default_model),
             embedding_url=os.getenv("RAG_EMBEDDING_URL", default_url),
-            embedding_api_key=os.getenv(
-                "RAG_EMBEDDING_API_KEY",
-                "" if normalized_provider == "ollama" else os.getenv("OPENAI_API_KEY", ""),
-            ),
+            embedding_api_key=api_key,
             embedding_timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT", "60")),
             embedding_dimensions=(
                 int(os.environ["RAG_EMBEDDING_DIMENSIONS"])

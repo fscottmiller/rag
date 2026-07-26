@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import Settings
 from .pipeline.chunking import BaseChunker, ChonkieChunker
-from .pipeline.embeddings import BaseEmbedder, create_embedder
+from .pipeline.embeddings import BaseEmbedder, create_embedder, embedding_configuration
 from .storage.sqlite import SQLiteStore
 
 
@@ -24,18 +24,41 @@ class RAGService:
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.store = store or SQLiteStore(self.settings.database_path)
-        self.embedder = embedder or create_embedder(
-            self.settings.embedding_provider,
-            self.settings.embedding_model,
-            self.settings.embedding_url,
-            self.settings.embedding_api_key,
-            self.settings.embedding_timeout,
-            self.settings.embedding_dimensions,
-            self.settings.embedding_batch_size,
+        self.embedder = (
+            embedder
+            if embedder is not None
+            else create_embedder(
+                self.settings.embedding_provider,
+                self.settings.embedding_model,
+                self.settings.embedding_url,
+                self.settings.embedding_api_key,
+                self.settings.embedding_timeout,
+                self.settings.embedding_dimensions,
+                self.settings.embedding_batch_size,
+            )
         )
-        self.chunker = chunker or ChonkieChunker(
-            self.settings.chunker, self.settings.chunk_size, self.settings.chunk_overlap
+        self.chunker = (
+            chunker
+            if chunker is not None
+            else ChonkieChunker(
+                self.settings.chunker, self.settings.chunk_size, self.settings.chunk_overlap
+            )
         )
+        configuration = embedding_configuration(self.embedder)
+        self._embedding_identity = (
+            (configuration.provider, configuration.model, configuration.fingerprint)
+            if configuration is not None
+            else None
+        )
+        if configuration is None:
+            if self.store.is_persistent():
+                raise ValueError(
+                    "Persistent indexes require a built-in embedder with a known identity"
+                )
+        else:
+            self.store.ensure_embedding_configuration(
+                configuration.provider, configuration.model, configuration.fingerprint
+            )
 
     def _prepare(self, content: str) -> tuple[list[str], list[list[float]]]:
         if len(content.encode("utf-8")) > self.settings.max_document_bytes:
@@ -60,8 +83,16 @@ class RAGService:
     ) -> dict[str, Any]:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
+        self.store.preflight_embedding_configuration(self._embedding_identity)
         chunks, embeddings = self._prepare(content)
-        return self.store.create_document(title, content, metadata or {}, chunks, embeddings)
+        return self.store.create_document(
+            title,
+            content,
+            metadata or {},
+            chunks,
+            embeddings,
+            expected_embedding_identity=self._embedding_identity,
+        )
 
     def update(
         self,
@@ -73,9 +104,16 @@ class RAGService:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
         self.store.get_document(document_id)
+        self.store.preflight_embedding_configuration(self._embedding_identity)
         chunks, embeddings = self._prepare(content)
         return self.store.replace_document(
-            document_id, title, content, metadata or {}, chunks, embeddings
+            document_id,
+            title,
+            content,
+            metadata or {},
+            chunks,
+            embeddings,
+            expected_embedding_identity=self._embedding_identity,
         )
 
     def search(
@@ -83,9 +121,15 @@ class RAGService:
     ) -> list[dict[str, Any]]:
         if not query.strip():
             raise ValueError("query must contain at least one non-whitespace character")
-        if top_k < 1 or top_k > 100:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
             raise ValueError("top_k must be between 1 and 100")
-        return self.store.search(self.embedder.embed_one(query), top_k, filter_metadata)
+        self.store.preflight_embedding_configuration(self._embedding_identity)
+        return self.store.search(
+            self.embedder.embed_one(query),
+            top_k,
+            filter_metadata,
+            expected_embedding_identity=self._embedding_identity,
+        )
 
     def list_documents(self) -> list[dict[str, Any]]:
         return self.store.list_documents()
@@ -94,4 +138,7 @@ class RAGService:
         return self.store.get_document(document_id)
 
     def delete_document(self, document_id: str) -> None:
-        self.store.delete_document(document_id)
+        self.store.preflight_embedding_configuration(self._embedding_identity)
+        self.store.delete_document(
+            document_id, expected_embedding_identity=self._embedding_identity
+        )

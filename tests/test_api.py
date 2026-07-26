@@ -205,6 +205,8 @@ def test_rest_not_found_and_validation_errors(service):
     assert client.post("/documents", json={"title": "x", "content": ""}).status_code == 422
     assert client.post("/search", json={"query": "x", "top_k": 0}).status_code == 422
     assert client.post("/search", json={"query": "x", "top_k": 101}).status_code == 422
+    assert client.post("/search", json={"query": "x", "top_k": True}).status_code == 422
+    assert client.post("/search", json={"query": "x", "top_k": "1"}).status_code == 422
     assert client.post("/search", json={"query": " "}).status_code == 400
 
 

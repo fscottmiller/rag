@@ -5,8 +5,88 @@ import math
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from hashlib import sha256
+from numbers import Real
+from threading import Lock
 from typing import Any, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
+
+_PROVIDER_ALIASES = {
+    "openai": "openai-compatible",
+    "openai-compatible-api": "openai-compatible",
+    "sentence-transformer": "sentence-transformers",
+    "transformers": "sentence-transformers",
+}
+
+
+def canonical_provider(provider: str) -> str:
+    normalized = provider.lower().replace("_", "-")
+    return _PROVIDER_ALIASES.get(normalized, normalized)
+
+
+@dataclass(frozen=True)
+class EmbeddingConfiguration:
+    provider: str
+    model: str
+    fingerprint: str
+
+
+def _endpoint_digest(url: str) -> str:
+    parsed = urlsplit(url)
+    # Userinfo is credentials, not index identity. Fragments are not sent in HTTP requests.
+    endpoint = urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.rsplit("@", 1)[-1].lower(),
+            parsed.path,
+            parsed.query,
+            "",
+        )
+    )
+    return sha256(endpoint.encode()).hexdigest()
+
+
+def _has_query_credentials(query: str) -> bool:
+    return any(
+        "".join(character for character in name.lower() if character.isalnum()).endswith(
+            ("key", "token", "secret", "password", "credential", "signature")
+        )
+        or "".join(character for character in name.lower() if character.isalnum())
+        in {"auth", "authorization", "sig"}
+        for name, _ in parse_qsl(query, keep_blank_values=True)
+    )
+
+
+def _configuration(provider: str, model: str, **settings: object) -> EmbeddingConfiguration:
+    provider = canonical_provider(provider)
+    values = {"provider": provider, "model": model, **settings}
+    fingerprint = sha256(
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return EmbeddingConfiguration(provider, model, fingerprint)
+
+
+def _validated_embeddings(vectors: list[object], expected_count: int) -> list[list[float]]:
+    if len(vectors) != expected_count or not all(isinstance(vector, list) for vector in vectors):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
+    if any(
+        isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value)
+        for vector in vectors
+        for value in vector
+    ):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
+    try:
+        embeddings = [[float(value) for value in vector] for vector in vectors]
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Embedding provider returned invalid embeddings") from exc
+    if embeddings and (
+        not embeddings[0]
+        or any(len(vector) != len(embeddings[0]) for vector in embeddings)
+        or any(not math.isfinite(value) for vector in embeddings for value in vector)
+    ):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
+    return embeddings
 
 
 class BaseEmbedder(ABC):
@@ -20,6 +100,8 @@ class BaseEmbedder(ABC):
 
 class SentenceTransformerEmbedder(BaseEmbedder):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        if not model_name.strip():
+            raise ValueError("embedding model must not be empty")
         self.model_name = model_name
         self._model = None
 
@@ -32,7 +114,45 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return self.model.encode(list(texts), convert_to_numpy=True).tolist()
+        inputs = list(texts)
+        try:
+            return _validated_embeddings(
+                self.model.encode(inputs, convert_to_numpy=True).tolist(), len(inputs)
+            )
+        except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError("SentenceTransformers returned invalid embeddings") from exc
+
+
+class FastEmbedEmbedder(BaseEmbedder):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+        if not model_name.strip():
+            raise ValueError("embedding model must not be empty")
+        self.model_name = model_name
+        self._model = None
+        self._model_lock = Lock()
+
+    @property
+    def model(self):
+        if self._model is None:
+            with self._model_lock:
+                if self._model is None:
+                    from fastembed import TextEmbedding
+
+                    self._model = TextEmbedding(model_name=self.model_name)
+        return self._model
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        inputs = list(texts)
+        if not inputs:
+            return []
+        try:
+            vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
+        try:
+            return _validated_embeddings(vectors, len(inputs))
+        except RuntimeError as exc:
+            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
 
 
 class OpenAICompatibleEmbedder(BaseEmbedder):
@@ -48,6 +168,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         timeout: float = 60.0,
         dimensions: int | None = None,
         batch_size: int = 64,
+        provider: str = "openai-compatible",
     ) -> None:
         if not model.strip():
             raise ValueError("embedding model must not be empty")
@@ -57,6 +178,11 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         parsed_url = urlparse(url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise ValueError("embedding URL must use an http or https scheme")
+        self.provider = canonical_provider(provider)
+        if self.provider == "openai-compatible" and parsed_url.scheme != "https":
+            raise ValueError("external embedding URL must use https")
+        if "@" in parsed_url.netloc or _has_query_credentials(parsed_url.query):
+            raise ValueError("embedding URL must not contain credentials; use embedding API key")
         if timeout <= 0:
             raise ValueError("embedding timeout must be positive")
         if dimensions is not None and dimensions < 1:
@@ -123,12 +249,13 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise RuntimeError("Embedding endpoint returned invalid embeddings")
         data = sorted(data, key=lambda item: item["index"])
         try:
-            embeddings = [[float(value) for value in item["embedding"]] for item in data]
-        except (KeyError, TypeError, ValueError) as exc:
+            vectors = [item["embedding"] for item in data]
+        except KeyError as exc:
             raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
-        if any(not all(math.isfinite(value) for value in vector) for vector in embeddings):
-            raise RuntimeError("Embedding endpoint returned invalid embeddings")
-        return embeddings
+        try:
+            return _validated_embeddings(vectors, len(inputs))
+        except RuntimeError as exc:
+            raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
 
 
 def create_embedder(
@@ -140,10 +267,12 @@ def create_embedder(
     embedding_dimensions: int | None = None,
     embedding_batch_size: int = 64,
 ) -> BaseEmbedder:
-    normalized = provider.lower().replace("_", "-")
-    if normalized in {"sentence-transformers", "sentence-transformer", "transformers"}:
+    normalized = canonical_provider(provider)
+    if normalized == "fastembed":
+        return FastEmbedEmbedder(model)
+    if normalized == "sentence-transformers":
         return SentenceTransformerEmbedder(model)
-    if normalized in {"ollama", "openai", "openai-compatible", "openai-compatible-api"}:
+    if normalized == "ollama":
         return OpenAICompatibleEmbedder(
             model,
             embedding_url,
@@ -151,5 +280,34 @@ def create_embedder(
             embedding_timeout,
             embedding_dimensions,
             embedding_batch_size,
+            normalized,
+        )
+    if normalized == "openai-compatible":
+        if not embedding_api_key.strip():
+            raise ValueError("embedding API key must not be empty for external providers")
+        return OpenAICompatibleEmbedder(
+            model,
+            embedding_url,
+            embedding_api_key,
+            embedding_timeout,
+            embedding_dimensions,
+            embedding_batch_size,
+            normalized,
         )
     raise ValueError(f"Unknown embedding provider: {provider}")
+
+
+def embedding_configuration(embedder: BaseEmbedder) -> EmbeddingConfiguration | None:
+    """Return a persistent index identity for built-in embedders only."""
+    if type(embedder) is FastEmbedEmbedder:
+        return _configuration("fastembed", embedder.model_name)
+    if type(embedder) is SentenceTransformerEmbedder:
+        return _configuration("sentence-transformers", embedder.model_name)
+    if type(embedder) is OpenAICompatibleEmbedder:
+        return _configuration(
+            embedder.provider,
+            embedder.model,
+            dimensions=embedder.dimensions,
+            endpoint=_endpoint_digest(embedder.url),
+        )
+    return None

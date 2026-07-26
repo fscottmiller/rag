@@ -8,11 +8,12 @@ The default database is in memory for a zero-setup local experience. Set `RAG_DA
 
 ```bash
 uv sync
-uv sync --extra local-embeddings
 uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
-The second command installs the default Sentence Transformers provider. For any OpenAI-compatible embedding API, configure the endpoint, model, and optional credentials in the environment:
+Python 3.11 through 3.13 are supported.
+
+FastEmbed and `BAAI/bge-small-en-v1.5` are the default local provider and model; the model downloads on first embedding request. If `RAG_EMBEDDING_PROVIDER` is unset and `RAG_EMBEDDING_API_KEY` or `OPENAI_API_KEY` is set, the service instead uses OpenAI-compatible embeddings. Configure an external provider explicitly with credentials:
 
 ```bash
 RAG_EMBEDDING_PROVIDER=openai-compatible \
@@ -43,6 +44,10 @@ RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.api.m
 ```
 
 Use a separate database path and port for every instance. This keeps vector spaces, chunking behavior, and lifecycle management isolated.
+
+### Upgrade existing indexes
+
+Indexes created before the FastEmbed default did not record their embedding identity. Move or delete a nonempty existing database and re-ingest its documents before starting this version; this prevents 384-dimensional legacy `all-MiniLM-L6-v2` vectors from being mixed with `BAAI/bge-small-en-v1.5` vectors. New indexes record the canonical provider, model, dimensions, and a non-secret endpoint fingerprint; empty indexes can adopt a new identity.
 
 ## REST API
 
@@ -127,10 +132,10 @@ These variables define the configuration of the current index, not per-document 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RAG_DATABASE_PATH` | `:memory:` | Use a SQLite file instead of memory. |
-| `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` | Select `sentence-transformers`, `openai-compatible`, or `ollama`. |
-| `RAG_EMBEDDING_MODEL` | provider-dependent | Embedding model name sent to the configured provider. Ollama defaults to `nomic-embed-text`. |
-| `RAG_EMBEDDING_URL` | provider-dependent | OpenAI-compatible HTTP(S) embeddings endpoint. Ollama defaults to `http://localhost:11434/v1/embeddings`; non-HTTP schemes are rejected. |
-| `RAG_EMBEDDING_API_KEY` | `OPENAI_API_KEY` fallback | Optional Bearer token for the embeddings endpoint. |
+| `RAG_EMBEDDING_PROVIDER` | `fastembed`, or `openai-compatible` when an API key is set | Select `fastembed`, `sentence-transformers`, `openai-compatible`, or `ollama`. |
+| `RAG_EMBEDDING_MODEL` | provider-dependent | FastEmbed defaults to `BAAI/bge-small-en-v1.5`; Ollama defaults to `nomic-embed-text`. |
+| `RAG_EMBEDDING_URL` | provider-dependent | External OpenAI-compatible endpoint; it must use HTTPS. Ollama defaults to `http://localhost:11434/v1/embeddings` and may use HTTP; non-HTTP schemes are rejected. |
+| `RAG_EMBEDDING_API_KEY` | `OPENAI_API_KEY` fallback for OpenAI-compatible providers | Required for external OpenAI-compatible providers; optional for Ollama. Ollama never reads `OPENAI_API_KEY`. |
 | `RAG_EMBEDDING_TIMEOUT` | `60` | Embedding request timeout in seconds. |
 | `RAG_EMBEDDING_DIMENSIONS` | unset | Optional output dimension sent to compatible providers. |
 | `RAG_CHUNKER` | `recursive` | Select `recursive`, `sentence`, or `token`. |

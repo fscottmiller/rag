@@ -10,6 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from numbers import Real
 from typing import Any, Callable, Iterable, TypeVar
 
 import sqlite_vec
@@ -63,12 +64,28 @@ class SQLiteStore:
                 metadata TEXT NOT NULL DEFAULT '{}',
                 UNIQUE(document_id, ordinal)
             );
+            CREATE TABLE IF NOT EXISTS index_metadata (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                embedding_provider TEXT NOT NULL,
+                embedding_model TEXT NOT NULL,
+                embedding_fingerprint TEXT
+            );
             """
         )
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(index_metadata)")}
+        if "embedding_fingerprint" not in columns:
+            try:
+                self.connection.execute(
+                    "ALTER TABLE index_metadata ADD COLUMN embedding_fingerprint TEXT"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.commit()
 
     def _load_vector_dimension(self) -> None:
+        self._vector_dimension = None
         row = self.connection.execute(
             "SELECT sql FROM sqlite_master WHERE name = 'vec_chunks'"
         ).fetchone()
@@ -78,6 +95,7 @@ class SQLiteStore:
                 self._vector_dimension = int(match.group(1))
 
     def _ensure_vector_table(self, dimension: int) -> None:
+        self._load_vector_dimension()
         if self._vector_dimension == dimension:
             return
         if self._vector_dimension is not None and self._vector_dimension != dimension:
@@ -88,7 +106,15 @@ class SQLiteStore:
             f"embedding FLOAT[{dimension}] distance_metric=cosine)"
         )
         self._vector_dimension = dimension
-        self.connection.commit()
+
+    def _drop_empty_vector_table(self) -> None:
+        self._load_vector_dimension()
+        if self._vector_dimension is None:
+            return
+        if self.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]:
+            raise ValueError("Cannot replace embedding identity while vector data remains")
+        self.connection.execute("DROP TABLE vec_chunks")
+        self._vector_dimension = None
 
     @staticmethod
     def _now() -> str:
@@ -103,21 +129,25 @@ class SQLiteStore:
         return json.loads(value) if value else {}
 
     @staticmethod
-    def _validate_embeddings(chunks: list[str], embeddings: list[list[float]]) -> None:
+    def _normalize_vector(vector: list[float]) -> list[float]:
+        if any(
+            isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value)
+            for value in vector
+        ):
+            raise ValueError("Embeddings must contain only finite numbers")
+        return [float(value) for value in vector]
+
+    @classmethod
+    def _validate_embeddings(
+        cls, chunks: list[str], embeddings: list[list[float]]
+    ) -> list[list[float]]:
         if len(chunks) != len(embeddings):
             raise ValueError("Every chunk must have one embedding")
         if embeddings:
             dimension = len(embeddings[0])
             if dimension == 0 or any(len(vector) != dimension for vector in embeddings):
                 raise ValueError("All embeddings must have the same non-zero dimension")
-            try:
-                finite = all(
-                    math.isfinite(float(value)) for vector in embeddings for value in vector
-                )
-            except (TypeError, ValueError):
-                finite = False
-            if not finite:
-                raise ValueError("Embeddings must contain only finite numbers")
+        return [cls._normalize_vector(vector) for vector in embeddings]
 
     @_synchronized
     def create_document(
@@ -128,15 +158,18 @@ class SQLiteStore:
         chunks: Iterable[str],
         embeddings: Iterable[list[float]],
         document_id: str | None = None,
+        expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
         document_id = document_id or str(uuid.uuid4())
         chunks = list(chunks)
         embeddings = list(embeddings)
-        self._validate_embeddings(chunks, embeddings)
-        if embeddings:
-            self._ensure_vector_table(len(embeddings[0]))
+        embeddings = self._validate_embeddings(chunks, embeddings)
         now = self._now()
         with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            self._require_embedding_configuration(expected_embedding_identity)
+            if embeddings:
+                self._ensure_vector_table(len(embeddings[0]))
             self.connection.execute(
                 "INSERT INTO documents "
                 "(id,title,content,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?)",
@@ -205,6 +238,74 @@ class SQLiteStore:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
     @_synchronized
+    def is_persistent(self) -> bool:
+        return bool(
+            next(
+                (
+                    row[2]
+                    for row in self.connection.execute("PRAGMA database_list")
+                    if row[1] == "main"
+                ),
+                "",
+            )
+        )
+
+    @_synchronized
+    def ensure_embedding_configuration(self, provider: str, model: str, fingerprint: str) -> None:
+        """Bind an index to its complete embedding identity."""
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute(
+                "SELECT embedding_provider, embedding_model, embedding_fingerprint "
+                "FROM index_metadata WHERE id = 1"
+            ).fetchone()
+            if existing is not None and tuple(existing) == (provider, model, fingerprint):
+                return
+            if self._chunk_count_all():
+                if existing is None:
+                    raise ValueError(
+                        "Index has no embedding configuration metadata; reindex the database "
+                        "before using it with the current embedding model."
+                    )
+                self._raise_embedding_configuration_error()
+            self._drop_empty_vector_table()
+            if existing is None:
+                self.connection.execute(
+                    "INSERT INTO index_metadata "
+                    "(id, embedding_provider, embedding_model, embedding_fingerprint) "
+                    "VALUES (1, ?, ?, ?)",
+                    (provider, model, fingerprint),
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE index_metadata SET embedding_provider=?, embedding_model=?, "
+                    "embedding_fingerprint=? WHERE id=1",
+                    (provider, model, fingerprint),
+                )
+
+    @staticmethod
+    def _raise_embedding_configuration_error() -> None:
+        raise ValueError(
+            "Index embedding configuration does not match this service; "
+            "reindex the database with the configured embedding model."
+        )
+
+    def _require_embedding_configuration(self, expected: tuple[str, str, str] | None) -> None:
+        if expected is None:
+            return
+        existing = self.connection.execute(
+            "SELECT embedding_provider, embedding_model, embedding_fingerprint "
+            "FROM index_metadata WHERE id = 1"
+        ).fetchone()
+        if existing is None or tuple(existing) != expected:
+            self._raise_embedding_configuration_error()
+
+    @_synchronized
+    def preflight_embedding_configuration(self, expected: tuple[str, str, str] | None) -> None:
+        """Reject stale embedding identities before provider work begins."""
+        self._require_embedding_configuration(expected)
+
+    @_synchronized
     def replace_document(
         self,
         document_id: str,
@@ -213,19 +314,22 @@ class SQLiteStore:
         metadata: dict[str, Any],
         chunks: Iterable[str],
         embeddings: Iterable[list[float]],
+        expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
-        if (
-            self.connection.execute(
-                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-            ).fetchone()
-            is None
-        ):
-            raise DocumentNotFoundError(document_id)
         chunks, embeddings = list(chunks), list(embeddings)
-        self._validate_embeddings(chunks, embeddings)
-        if embeddings:
-            self._ensure_vector_table(len(embeddings[0]))
+        embeddings = self._validate_embeddings(chunks, embeddings)
         with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+                ).fetchone()
+                is None
+            ):
+                raise DocumentNotFoundError(document_id)
+            self._require_embedding_configuration(expected_embedding_identity)
+            if embeddings:
+                self._ensure_vector_table(len(embeddings[0]))
             old_ids = [
                 row[0]
                 for row in self.connection.execute(
@@ -253,15 +357,21 @@ class SQLiteStore:
         return self.get_document(document_id)
 
     @_synchronized
-    def delete_document(self, document_id: str) -> None:
-        if (
-            self.connection.execute(
-                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-            ).fetchone()
-            is None
-        ):
-            raise DocumentNotFoundError(document_id)
+    def delete_document(
+        self,
+        document_id: str,
+        expected_embedding_identity: tuple[str, str, str] | None = None,
+    ) -> None:
         with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+                ).fetchone()
+                is None
+            ):
+                raise DocumentNotFoundError(document_id)
+            self._require_embedding_configuration(expected_embedding_identity)
             ids = [
                 row[0]
                 for row in self.connection.execute(
@@ -276,8 +386,16 @@ class SQLiteStore:
 
     @_synchronized
     def search(
-        self, vector: list[float], top_k: int, filter_metadata: dict[str, Any] | None = None
+        self,
+        vector: list[float],
+        top_k: int,
+        filter_metadata: dict[str, Any] | None = None,
+        expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> list[dict[str, Any]]:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be between 1 and 100")
+        vector = self._normalize_vector(vector)
+        self._require_embedding_configuration(expected_embedding_identity)
         if self._vector_dimension is None:
             self._load_vector_dimension()
         if self._vector_dimension is None:

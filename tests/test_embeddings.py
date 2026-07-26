@@ -1,12 +1,16 @@
 import json
+import sys
 import threading
+import time
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
 
 from utralight_rag.pipeline.embeddings import (
     BaseEmbedder,
+    FastEmbedEmbedder,
     OpenAICompatibleEmbedder,
     SentenceTransformerEmbedder,
     create_embedder,
@@ -23,6 +27,7 @@ def test_base_embedder_embeds_one_text():
 
 
 def test_embedder_factory_supports_provider_aliases():
+    assert isinstance(create_embedder("fastembed", "model"), FastEmbedEmbedder)
     assert isinstance(
         create_embedder("sentence_transformers", "model", "url"), SentenceTransformerEmbedder
     )
@@ -30,13 +35,110 @@ def test_embedder_factory_supports_provider_aliases():
     assert isinstance(ollama_embedder, OpenAICompatibleEmbedder)
     assert ollama_embedder.url == "http://ollama/v1/embeddings"
     openai_embedder = create_embedder(
-        "openai_compatible", "model", "http://embedding.test/v1/embeddings", "secret", 5, 768
+        "openai_compatible", "model", "https://embedding.test/v1/embeddings", "secret", 5, 768
     )
     assert isinstance(openai_embedder, OpenAICompatibleEmbedder)
-    assert openai_embedder.url == "http://embedding.test/v1/embeddings"
+    assert openai_embedder.url == "https://embedding.test/v1/embeddings"
     assert openai_embedder.dimensions == 768
+    with pytest.raises(ValueError, match="API key"):
+        create_embedder("openai-compatible", "model")
+    with pytest.raises(ValueError, match="https"):
+        create_embedder("openai-compatible", "model", "http://embedding.test", "secret")
     with pytest.raises(ValueError, match="Unknown embedding provider"):
         create_embedder("unknown", "model", "url")
+
+
+def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
+    constructed = []
+
+    class Vector:
+        def tolist(self):
+            return [1.0, 2.0]
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            constructed.append(model_name)
+
+        def embed(self, texts):
+            return (Vector() for _ in texts)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    embedder = create_embedder("fastembed", "test-model")
+    assert constructed == []
+    assert embedder.embed([]) == []
+    assert constructed == []
+    assert embedder.embed(["one", "two"]) == [[1.0, 2.0], [1.0, 2.0]]
+    assert constructed == ["test-model"]
+
+
+@pytest.mark.parametrize(
+    "vectors",
+    [[], [[]], [[1.0], [1.0, 2.0]], [["1.0"]], [[float("nan")]], [[True]]],
+)
+def test_fastembed_rejects_malformed_vectors(monkeypatch, vectors):
+    class Vector:
+        def __init__(self, value):
+            self.value = value
+
+        def tolist(self):
+            return self.value
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            pass
+
+        def embed(self, texts):
+            return (Vector(vector) for vector in vectors)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+        FastEmbedEmbedder("test-model").embed(["one"])
+
+
+def test_fastembed_rejects_vectors_without_tolist(monkeypatch):
+    class TextEmbedding:
+        def __init__(self, model_name):
+            pass
+
+        def embed(self, texts):
+            return [object()]
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+        FastEmbedEmbedder("test-model").embed(["one"])
+
+
+def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypatch):
+    constructed = []
+    start = threading.Barrier(3)
+
+    class Vector:
+        def tolist(self):
+            return [1.0]
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            constructed.append(model_name)
+            time.sleep(0.01)
+
+        def embed(self, texts):
+            return (Vector() for _ in texts)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    embedder = FastEmbedEmbedder("test-model")
+
+    def embed():
+        start.wait()
+        assert embedder.embed(["text"]) == [[1.0]]
+
+    threads = [threading.Thread(target=embed) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
+    assert constructed == ["test-model"]
 
 
 def test_ollama_uses_openai_compatible_embeddings_endpoint():
@@ -136,29 +238,38 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
             "test-key",
             timeout=5,
             dimensions=2,
+            provider="ollama",
         )
         assert embedder.embed(["first", "second"]) == [[0.0, 1.0], [2.0, 3.0]]
         first_request = requests[0]
         assert embedder.embed([]) == []
         requests.clear()
-        batched = OpenAICompatibleEmbedder("model", f"{base_url}/batch", batch_size=1)
+        batched = OpenAICompatibleEmbedder(
+            "model", f"{base_url}/batch", batch_size=1, provider="ollama"
+        )
         assert batched.embed(["first", "second"]) == [[0.0, 1.0], [0.0, 1.0]]
         assert len(requests) == 2
         with pytest.raises(RuntimeError, match="unexpected data count"):
-            OpenAICompatibleEmbedder("model", f"{base_url}/bad").embed(["one"])
+            OpenAICompatibleEmbedder("model", f"{base_url}/bad", provider="ollama").embed(["one"])
         with pytest.raises(RuntimeError, match="HTTP 503"):
-            OpenAICompatibleEmbedder("model", f"{base_url}/http-error").embed(["one"])
-        too_large = OpenAICompatibleEmbedder("model", f"{base_url}/too-large")
+            OpenAICompatibleEmbedder("model", f"{base_url}/http-error", provider="ollama").embed(
+                ["one"]
+            )
+        too_large = OpenAICompatibleEmbedder("model", f"{base_url}/too-large", provider="ollama")
         too_large.max_response_bytes = 3
         with pytest.raises(RuntimeError, match="exceeds size limit"):
             too_large.embed(["one"])
         with pytest.raises(RuntimeError, match="invalid JSON"):
-            OpenAICompatibleEmbedder("model", f"{base_url}/invalid-json").embed(["one"])
+            OpenAICompatibleEmbedder("model", f"{base_url}/invalid-json", provider="ollama").embed(
+                ["one"]
+            )
         with pytest.raises(RuntimeError, match="invalid embeddings"):
-            OpenAICompatibleEmbedder("model", f"{base_url}/invalid-embedding").embed(["one"])
+            OpenAICompatibleEmbedder(
+                "model", f"{base_url}/invalid-embedding", provider="ollama"
+            ).embed(["one"])
         for path in ("duplicate-index", "missing-index", "nonfinite", "non-dict", "bad-index"):
             with pytest.raises(RuntimeError, match="invalid embeddings"):
-                OpenAICompatibleEmbedder("model", f"{base_url}/{path}").embed(
+                OpenAICompatibleEmbedder("model", f"{base_url}/{path}", provider="ollama").embed(
                     ["one", "two"] if path in ("duplicate-index", "missing-index") else ["one"]
                 )
     finally:
@@ -199,6 +310,11 @@ def test_openai_compatible_embedder_rejects_non_http_urls():
         OpenAICompatibleEmbedder("model", "ftp://embedding.example/v1/embeddings")
 
 
+def test_openai_compatible_embedder_rejects_http_endpoint():
+    with pytest.raises(ValueError, match="https"):
+        OpenAICompatibleEmbedder("model", "http://embedding.example/v1/embeddings", "secret")
+
+
 def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
     class ErrorBody:
         def read(self, size):
@@ -212,7 +328,7 @@ def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
         raise urllib.error.HTTPError("http://embedding.test", 503, "Unavailable", {}, ErrorBody())
 
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
-    embedder = OpenAICompatibleEmbedder("model", "http://embedding.test")
+    embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
     embedder.max_response_bytes = 3
     with pytest.raises(RuntimeError, match="HTTP 503: error"):
         embedder.embed(["one"])

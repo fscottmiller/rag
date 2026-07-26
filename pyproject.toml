@@ -3,10 +3,12 @@ name = "utralight-rag-mcp"
 version = "0.1.0"
 description = "Utralight RAG service with REST and MCP interfaces"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
   "chonkie>=1.0.0",
   "fastapi>=0.115.0",
+  "fastembed>=0.7.4",
+  "onnxruntime<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
   "mcp>=1.27,<2",
   "python-multipart>=0.0.9",
   "sqlite-vec>=0.1.6",
