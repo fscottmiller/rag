@@ -107,3 +107,30 @@ def test_service_enforces_document_limit(service):
     )
     with pytest.raises(ValueError, match="document content"):
         configured.ingest("Too large", "12345")
+
+
+def test_service_requires_reindex_for_legacy_nonempty_index(tmp_path):
+    database = tmp_path / "legacy.sqlite3"
+    legacy = SQLiteStore(str(database))
+    legacy.create_document("Old", "text", {}, ["text"], [[1.0] * 384])
+    legacy.close()
+
+    with pytest.raises(ValueError, match="reindex"):
+        RAGService(
+            SQLiteStore(str(database)), object(), object(), Settings(database_path=str(database))
+        )
+
+
+def test_service_rejects_different_embedding_model_for_existing_index(tmp_path):
+    database = tmp_path / "index.sqlite3"
+    settings = Settings(database_path=str(database), embedding_model="first-model")
+    first = RAGService(SQLiteStore(str(database)), object(), object(), settings)
+    first.store.close()
+
+    with pytest.raises(ValueError, match="provider/model"):
+        RAGService(
+            SQLiteStore(str(database)),
+            object(),
+            object(),
+            Settings(database_path=str(database), embedding_model="second-model"),
+        )

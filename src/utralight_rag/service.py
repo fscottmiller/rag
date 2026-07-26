@@ -24,6 +24,9 @@ class RAGService:
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.store = store or SQLiteStore(self.settings.database_path)
+        self.store.ensure_embedding_configuration(
+            self.settings.embedding_provider, self.settings.embedding_model
+        )
         self.embedder = embedder or create_embedder(
             self.settings.embedding_provider,
             self.settings.embedding_model,

@@ -63,6 +63,11 @@ class SQLiteStore:
                 metadata TEXT NOT NULL DEFAULT '{}',
                 UNIQUE(document_id, ordinal)
             );
+            CREATE TABLE IF NOT EXISTS index_metadata (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                embedding_provider TEXT NOT NULL,
+                embedding_model TEXT NOT NULL
+            );
             """
         )
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -203,6 +208,41 @@ class SQLiteStore:
 
     def _chunk_count_all(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+    @_synchronized
+    def ensure_embedding_configuration(self, provider: str, model: str) -> None:
+        """Bind a nonempty index to its embedding provider and model."""
+        provider = provider.lower().replace("_", "-")
+        existing = self.connection.execute(
+            "SELECT embedding_provider, embedding_model FROM index_metadata WHERE id = 1"
+        ).fetchone()
+        if existing is not None:
+            if tuple(existing) != (provider, model):
+                self._raise_embedding_configuration_error()
+            return
+        if self._chunk_count_all():
+            raise ValueError(
+                "Index has no embedding provider/model metadata; reindex the database "
+                "before using it with the current embedding model."
+            )
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR IGNORE INTO index_metadata "
+                "(id, embedding_provider, embedding_model) VALUES (1, ?, ?)",
+                (provider, model),
+            )
+        existing = self.connection.execute(
+            "SELECT embedding_provider, embedding_model FROM index_metadata WHERE id = 1"
+        ).fetchone()
+        if existing is None or tuple(existing) != (provider, model):
+            self._raise_embedding_configuration_error()
+
+    @staticmethod
+    def _raise_embedding_configuration_error() -> None:
+        raise ValueError(
+            "Index embedding provider/model does not match this service; "
+            "reindex the database with the configured embedding model."
+        )
 
     @_synchronized
     def replace_document(

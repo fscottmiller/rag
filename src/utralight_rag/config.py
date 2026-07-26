@@ -44,19 +44,18 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         provider = os.getenv("RAG_EMBEDDING_PROVIDER")
-        api_key = next(
-            (
-                key.strip()
-                for key in (
-                    os.getenv("RAG_EMBEDDING_API_KEY", ""),
-                    os.getenv("OPENAI_API_KEY", ""),
-                )
-                if key.strip()
-            ),
-            "",
-        )
+        configured_api_key = os.getenv("RAG_EMBEDDING_API_KEY", "").strip()
         if provider is None:
-            provider = "openai-compatible" if api_key.strip() else "fastembed"
+            api_key = configured_api_key or os.getenv("OPENAI_API_KEY", "").strip()
+            provider = "openai-compatible" if api_key else "fastembed"
+        else:
+            normalized_explicit_provider = provider.lower().replace("_", "-")
+            api_key = configured_api_key or (
+                os.getenv("OPENAI_API_KEY", "").strip()
+                if normalized_explicit_provider
+                in {"openai", "openai-compatible", "openai-compatible-api"}
+                else ""
+            )
         normalized_provider = provider.lower().replace("_", "-")
         default_model = (
             "text-embedding-3-small"

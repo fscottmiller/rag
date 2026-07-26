@@ -78,6 +78,13 @@ def test_ollama_uses_common_openai_compatible_settings(monkeypatch):
     assert Settings.from_env().embedding_api_key == ""
 
 
+def test_ollama_never_uses_openai_api_key(monkeypatch):
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.delenv("RAG_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    assert Settings.from_env().embedding_api_key == ""
+
+
 def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypatch):
     monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "openai_compatible")
     monkeypatch.setenv("OPENAI_API_KEY", " fallback-key ")
