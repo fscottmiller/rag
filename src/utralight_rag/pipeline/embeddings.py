@@ -5,6 +5,7 @@ import math
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from threading import Lock
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
@@ -41,13 +42,16 @@ class FastEmbedEmbedder(BaseEmbedder):
             raise ValueError("embedding model must not be empty")
         self.model_name = model_name
         self._model = None
+        self._model_lock = Lock()
 
     @property
     def model(self):
         if self._model is None:
-            from fastembed import TextEmbedding
+            with self._model_lock:
+                if self._model is None:
+                    from fastembed import TextEmbedding
 
-            self._model = TextEmbedding(model_name=self.model_name)
+                    self._model = TextEmbedding(model_name=self.model_name)
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:

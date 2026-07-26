@@ -67,11 +67,15 @@ def test_settings_read_all_environment_values(monkeypatch):
 
 def test_ollama_uses_common_openai_compatible_settings(monkeypatch):
     monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setenv("RAG_EMBEDDING_API_KEY", " ollama-key ")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings = Settings.from_env()
     assert settings.embedding_model == "nomic-embed-text"
     assert settings.embedding_url == "http://localhost:11434/v1/embeddings"
-    assert settings.embedding_api_key == ""
+    assert settings.embedding_api_key == "ollama-key"
+
+    monkeypatch.delenv("RAG_EMBEDDING_API_KEY")
+    assert Settings.from_env().embedding_api_key == ""
 
 
 def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypatch):

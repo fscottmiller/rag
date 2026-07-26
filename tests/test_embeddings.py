@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import time
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -63,6 +64,39 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
     embedder = create_embedder("fastembed", "test-model")
     assert constructed == []
     assert embedder.embed(["one", "two"]) == [[1.0, 2.0], [1.0, 2.0]]
+    assert constructed == ["test-model"]
+
+
+def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypatch):
+    constructed = []
+    start = threading.Barrier(3)
+
+    class Vector:
+        def tolist(self):
+            return [1.0]
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            constructed.append(model_name)
+            time.sleep(0.01)
+
+        def embed(self, texts):
+            return (Vector() for _ in texts)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    embedder = FastEmbedEmbedder("test-model")
+
+    def embed():
+        start.wait()
+        assert embedder.embed(["text"]) == [[1.0]]
+
+    threads = [threading.Thread(target=embed) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
     assert constructed == ["test-model"]
 
 

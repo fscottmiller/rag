@@ -77,11 +77,7 @@ class Settings:
             embedding_provider=provider,
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL", default_model),
             embedding_url=os.getenv("RAG_EMBEDDING_URL", default_url),
-            embedding_api_key=(
-                os.getenv("RAG_EMBEDDING_API_KEY", "")
-                if normalized_provider == "ollama"
-                else api_key
-            ),
+            embedding_api_key=api_key,
             embedding_timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT", "60")),
             embedding_dimensions=(
                 int(os.environ["RAG_EMBEDDING_DIMENSIONS"])

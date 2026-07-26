@@ -11,6 +11,8 @@ uv sync
 uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
+Python 3.11 through 3.13 are supported.
+
 FastEmbed and `BAAI/bge-small-en-v1.5` are the default local provider and model; the model downloads on first embedding request. If `RAG_EMBEDDING_PROVIDER` is unset and `RAG_EMBEDDING_API_KEY` or `OPENAI_API_KEY` is set, the service instead uses OpenAI-compatible embeddings. Configure an external provider explicitly with credentials:
 
 ```bash
