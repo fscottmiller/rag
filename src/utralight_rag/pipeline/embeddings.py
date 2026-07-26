@@ -35,6 +35,25 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         return self.model.encode(list(texts), convert_to_numpy=True).tolist()
 
 
+class FastEmbedEmbedder(BaseEmbedder):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+        if not model_name.strip():
+            raise ValueError("embedding model must not be empty")
+        self.model_name = model_name
+        self._model = None
+
+    @property
+    def model(self):
+        if self._model is None:
+            from fastembed import TextEmbedding
+
+            self._model = TextEmbedding(model_name=self.model_name)
+        return self._model
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [embedding.tolist() for embedding in self.model.embed(list(texts))]
+
+
 class OpenAICompatibleEmbedder(BaseEmbedder):
     """Embed text through an OpenAI-compatible /v1/embeddings endpoint."""
 
@@ -141,9 +160,22 @@ def create_embedder(
     embedding_batch_size: int = 64,
 ) -> BaseEmbedder:
     normalized = provider.lower().replace("_", "-")
+    if normalized == "fastembed":
+        return FastEmbedEmbedder(model)
     if normalized in {"sentence-transformers", "sentence-transformer", "transformers"}:
         return SentenceTransformerEmbedder(model)
-    if normalized in {"ollama", "openai", "openai-compatible", "openai-compatible-api"}:
+    if normalized == "ollama":
+        return OpenAICompatibleEmbedder(
+            model,
+            embedding_url,
+            embedding_api_key,
+            embedding_timeout,
+            embedding_dimensions,
+            embedding_batch_size,
+        )
+    if normalized in {"openai", "openai-compatible", "openai-compatible-api"}:
+        if not embedding_api_key.strip():
+            raise ValueError("embedding API key must not be empty for external providers")
         return OpenAICompatibleEmbedder(
             model,
             embedding_url,

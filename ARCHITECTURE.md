@@ -14,7 +14,7 @@ REST handlers that call the synchronous service run as regular FastAPI handlers,
 - `src/utralight_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
 - `src/utralight_rag/combined.py`: Combined REST and streamable HTTP MCP entry point with one injected service.
 - `src/utralight_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
-- `src/utralight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
+- `src/utralight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, FastEmbed, legacy local, and OpenAI-compatible embedding implementations.
 - `src/utralight_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
 
 The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for a Utralight deployment, but large filtered indexes would need database-side filtering or metadata indexes.
@@ -41,7 +41,7 @@ Alternative: custom splitting would be smaller initially but would duplicate bou
 
 ### ADR-004: Pluggable embeddings
 
-`BaseEmbedder` is the stable boundary for embedding providers. Sentence Transformers using `all-MiniLM-L6-v2` is the default local provider. OpenAI-compatible providers, including Ollama, use one endpoint/model/API key/timeout/dimensions configuration through `RAG_EMBEDDING_*`; Ollama defaults to its `/v1/embeddings` endpoint and `nomic-embed-text` model. Ingestion sends chunks in bounded `RAG_EMBEDDING_BATCH_SIZE` batches, and provider responses must contain exactly one finite vector for each input index. The selected embedding configuration is fixed for the service instance and is used for both ingestion and query execution.
+`BaseEmbedder` is the stable boundary for embedding providers. FastEmbed using `BAAI/bge-small-en-v1.5` is the default local provider and lazy-loads its model on first use. When no provider is configured, a non-empty `RAG_EMBEDDING_API_KEY` or `OPENAI_API_KEY` selects the OpenAI-compatible provider; otherwise FastEmbed is selected. External OpenAI-compatible providers require credentials, while explicit Ollama remains credential-optional and uses its `/v1/embeddings` endpoint and `nomic-embed-text` model. Sentence Transformers remains an optional legacy local provider. Ingestion sends chunks in bounded `RAG_EMBEDDING_BATCH_SIZE` batches, and provider responses must contain exactly one finite vector for each input index. The selected embedding configuration is fixed for the service instance and is used for both ingestion and query execution.
 
 Alternative: separate Ollama settings would duplicate the same protocol configuration and make provider switching harder.
 
@@ -85,8 +85,6 @@ Alternative: comparing Content-Length directly with the document limit is incorr
 
 ```bash
 uv sync
-# Install the default local model provider when using sentence-transformers:
-uv sync --extra local-embeddings
 
 # One process serves REST and streamable HTTP MCP on one index.
 RAG_DATABASE_PATH=/var/lib/rag/index.sqlite \
@@ -101,4 +99,4 @@ uv run python -m utralight_rag.mcp_server.server
 uv run pytest
 ```
 
-The MCP process uses stdio by default and supports streamable HTTP as the only network transport. Sentence Transformers is an optional dependency because its PyTorch runtime is large. Ollama uses the same OpenAI-compatible embedding settings as other compatible providers. Set `RAG_AUTH_MODE=trusted-proxy` only when a reverse proxy authenticates requests and overwrites the configured identity and role headers; otherwise the default `none` mode grants full access to every caller.
+The MCP process uses stdio by default and supports streamable HTTP as the only network transport. FastEmbed is included for the default local provider; Sentence Transformers remains optional because its PyTorch runtime is large. Ollama uses the same OpenAI-compatible embedding settings as other compatible providers. Set `RAG_AUTH_MODE=trusted-proxy` only when a reverse proxy authenticates requests and overwrites the configured identity and role headers; otherwise the default `none` mode grants full access to every caller.

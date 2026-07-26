@@ -3,10 +3,11 @@ import pytest
 from utralight_rag.config import Settings
 
 
-def test_settings_defaults_are_in_memory_and_local():
+def test_settings_defaults_are_in_memory_and_fastembed():
     settings = Settings()
     assert settings.database_path == ":memory:"
-    assert settings.embedding_provider == "sentence-transformers"
+    assert settings.embedding_provider == "fastembed"
+    assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
     assert settings.chunker == "recursive"
     assert settings.chunk_size == 512
     assert settings.chunk_overlap == 64
@@ -81,6 +82,25 @@ def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypa
     assert settings.embedding_url == "https://api.openai.com/v1/embeddings"
     assert settings.embedding_api_key == "fallback-key"
     assert "fallback-key" not in repr(settings)
+
+
+def test_unset_embedding_provider_uses_available_api_key(monkeypatch):
+    monkeypatch.delenv("RAG_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.setenv("RAG_EMBEDDING_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "fallback-key")
+    settings = Settings.from_env()
+    assert settings.embedding_provider == "openai-compatible"
+    assert settings.embedding_model == "text-embedding-3-small"
+    assert settings.embedding_api_key == "fallback-key"
+
+
+def test_unset_embedding_provider_without_api_key_uses_fastembed(monkeypatch):
+    monkeypatch.delenv("RAG_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("RAG_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings = Settings.from_env()
+    assert settings.embedding_provider == "fastembed"
+    assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
 
 
 def test_settings_reject_invalid_limits_and_hosts():
