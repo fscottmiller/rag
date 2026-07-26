@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from ..auth import Authorizer
 from ..service import RAGService
@@ -20,14 +21,20 @@ def get_transport() -> str:
     return transport
 
 
-def create_mcp(service: RAGService | None = None) -> FastMCP:
+def create_mcp(
+    service: RAGService | None = None,
+    *,
+    streamable_http_path: str | None = None,
+    transport_security: TransportSecuritySettings | None = None,
+) -> FastMCP:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
     server = FastMCP(
         "utralight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
-        streamable_http_path=os.getenv("MCP_PATH", "/mcp"),
+        streamable_http_path=streamable_http_path or os.getenv("MCP_PATH", "/mcp"),
+        transport_security=transport_security,
     )
 
     def authorize(ctx: Context, action: str) -> None:
@@ -84,7 +91,21 @@ def create_mcp(service: RAGService | None = None) -> FastMCP:
     return server
 
 
-mcp = create_mcp()
+_default_mcp: FastMCP | None = None
+
+
+def get_mcp() -> FastMCP:
+    global _default_mcp
+    if _default_mcp is None:
+        _default_mcp = create_mcp()
+    return _default_mcp
+
+
+def __getattr__(name: str) -> Any:
+    if name == "mcp":
+        return get_mcp()
+    raise AttributeError(name)
+
 
 if __name__ == "__main__":
-    mcp.run(transport=get_transport())
+    get_mcp().run(transport=get_transport())

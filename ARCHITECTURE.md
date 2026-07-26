@@ -2,16 +2,17 @@
 
 ## Overview
 
-Utralight provides a local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations.
+Utralight provides a local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations. The combined streamable-HTTP entry point mounts both adapters in one FastAPI process and injects the same service into each.
 
 Each service process owns exactly one index and one SQLite database. The default database is in memory; set `RAG_DATABASE_PATH` to use one local SQLite file when a process restart should preserve that index. Independent indexes run as independent service instances rather than as collections inside one process. The design intentionally does not include background jobs, evaluation metrics, synthetic QA generation, or benchmark code.
-REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. This is a deliberate Utralight deployment boundary rather than a substitute for a multi-process database layer.
+REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. SQLite WAL mode and a busy timeout provide additional safety when a stdio MCP process happens to access the same file-backed index.
 
 
 ## Components
 
 - `src/utralight_rag/api`: JSON and multipart REST routes for document CRUD and search.
 - `src/utralight_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
+- `src/utralight_rag/combined.py`: Combined REST and streamable HTTP MCP entry point with one injected service.
 - `src/utralight_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
 - `src/utralight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, local, and OpenAI-compatible embedding implementations.
 - `src/utralight_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
@@ -52,7 +53,7 @@ Alternative: implementing logic separately in route and tool handlers would be s
 
 ### ADR-006: Utralight storage lifecycle
 
-The default `:memory:` database keeps local setup fast and dependency-free. File-backed SQLite is also supported when an index should survive process restarts or be shared by REST and MCP processes. Migrations, replication, retention policies, and production-scale storage operations are intentionally out of scope.
+The default `:memory:` database keeps local setup fast and dependency-free. File-backed SQLite is also supported when an index should survive process restarts or be shared with a separately spawned stdio MCP process. The combined streamable-HTTP entry point uses one in-process store for both adapters, avoiding duplicate embedding models. Migrations, replication, retention policies, and production-scale storage operations are intentionally out of scope.
 
 ### ADR-007: One index per service instance
 
@@ -87,14 +88,16 @@ uv sync
 # Install the default local model provider when using sentence-transformers:
 uv sync --extra local-embeddings
 
-# Terminal 1: one instance owns one index.
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.api.main:app --port 8001
-# Terminal 2:
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.api.main:app --port 8002
+# One process serves REST and streamable HTTP MCP on one index.
+RAG_DATABASE_PATH=/var/lib/rag/index.sqlite \
+  uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 
+# Independent indexes still use separate combined instances.
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.combined:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.combined:app --port 8003
+
+# Stdio remains client-spawned and separate from the combined entry point.
 uv run python -m utralight_rag.mcp_server.server
-MCP_TRANSPORT=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp \
-  uv run python -m utralight_rag.mcp_server.server
 uv run pytest
 ```
 

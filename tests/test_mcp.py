@@ -1,6 +1,11 @@
-import pytest
+from dataclasses import replace
 
+import pytest
+from fastapi.testclient import TestClient
+
+from utralight_rag.combined import create_combined_app
 from utralight_rag.mcp_server.server import create_mcp, get_transport
+from utralight_rag.service import RAGService
 
 
 def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
@@ -44,3 +49,36 @@ async def test_mcp_tools_share_service_lifecycle(service):
     assert deleted == {"status": "deleted", "document_id": document_id}
     _, listed = await server.call_tool("list_documents", {})
     assert listed["result"] == []
+
+
+def test_combined_app_mounts_streamable_http_over_the_same_service(service):
+    public_service = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, trusted_hosts=("rag.example.com",)),
+    )
+    app = create_combined_app(public_service)
+    assert app.state.rag is public_service
+    assert app.state.mcp.session_manager is not None
+    assert any(getattr(route, "path", None) == "/mcp" for route in app.routes)
+
+    with TestClient(app, base_url="https://rag.example.com") as client:
+        assert client.get("/documents").status_code == 200
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream"},
+        )
+        assert response.status_code == 200
+        assert response.headers["mcp-session-id"]
+        assert '"serverInfo"' in response.text

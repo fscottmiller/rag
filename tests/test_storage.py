@@ -33,6 +33,9 @@ def test_file_database_reloads_vector_dimension(tmp_path):
     database = tmp_path / "index.sqlite3"
     first = SQLiteStore(str(database))
     first.create_document("Guide", "text", {}, ["text"], [[1.0, 0.0]])
+    assert first.connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert first.connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
     first.close()
 
     reopened = SQLiteStore(str(database))

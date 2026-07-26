@@ -9,7 +9,7 @@ The default database is in memory for a zero-setup local experience. Set `RAG_DA
 ```bash
 uv sync
 uv sync --extra local-embeddings
-uv run uvicorn utralight_rag.api.main:app --reload
+uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 The second command installs the default Sentence Transformers provider. For any OpenAI-compatible embedding API, configure the endpoint, model, and optional credentials in the environment:
@@ -19,7 +19,7 @@ RAG_EMBEDDING_PROVIDER=openai-compatible \
 RAG_EMBEDDING_URL=https://api.openai.com/v1/embeddings \
 RAG_EMBEDDING_MODEL=text-embedding-3-small \
 RAG_EMBEDDING_API_KEY="$OPENAI_API_KEY" \
-uv run uvicorn utralight_rag.api.main:app --reload
+uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Ollama uses the same OpenAI-compatible protocol and settings; there are no separate Ollama variables:
@@ -28,10 +28,10 @@ Ollama uses the same OpenAI-compatible protocol and settings; there are no separ
 RAG_EMBEDDING_PROVIDER=ollama \
 RAG_EMBEDDING_URL=http://localhost:11434/v1/embeddings \
 RAG_EMBEDDING_MODEL=nomic-embed-text \
-uv run uvicorn utralight_rag.api.main:app --reload
+uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
-Open the interactive API documentation at <http://127.0.0.1:8000/docs>.
+Open the interactive API documentation at <http://127.0.0.1:8001/docs>.
 
 ## Index isolation
 
@@ -49,7 +49,7 @@ Use a separate database path and port for every instance. This keeps vector spac
 Create a document:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/documents \
+curl -X POST http://127.0.0.1:8001/documents \
   -H 'content-type: application/json' \
   -d '{"title":"Notes","content":"Useful context","metadata":{"source":"manual"}}'
 ```
@@ -57,7 +57,7 @@ curl -X POST http://127.0.0.1:8000/documents \
 Search the index:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/search \
+curl -X POST http://127.0.0.1:8001/search \
   -H 'content-type: application/json' \
   -d '{"query":"useful context","top_k":5}'
 ```
@@ -73,25 +73,33 @@ Available endpoints:
 
 ## MCP
 
-Run the MCP server over stdio (the default):
+The combined entry point serves REST and streamable HTTP MCP from one process and one `RAGService`:
+
+```bash
+RAG_DATABASE_PATH=/var/lib/rag/index.sqlite \
+uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+```
+
+The MCP endpoint is `/mcp` by default. Register it in Claude Code with:
+
+```bash
+claude mcp add --transport http rag http://127.0.0.1:8001/mcp
+```
+
+Because REST accepts multipart file uploads, large documents can be ingested directly from disk without putting their contents into an MCP tool call:
+
+```bash
+curl -F 'file=@/path/to/google-sre-book.md' http://127.0.0.1:8001/documents
+curl -F 'file=@/path/to/clean-code.txt' http://127.0.0.1:8001/documents
+```
+
+The indexed documents are then available through `rag_search`, `list_documents`, and `get_document`. Available tools are `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
+
+Run the MCP server over stdio (the default) when a client should spawn it directly; this mode remains a separate process:
 
 ```bash
 uv run python -m utralight_rag.mcp_server.server
 ```
-
-Use streamable HTTP when an MCP client or proxy needs an HTTP endpoint:
-
-```bash
-MCP_TRANSPORT=streamable-http \
-MCP_HOST=127.0.0.1 \
-MCP_PORT=8000 \
-MCP_PATH=/mcp \
-uv run python -m utralight_rag.mcp_server.server
-```
-
-Available tools: `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
-
-When REST and MCP run as separate processes, set the same file-backed `RAG_DATABASE_PATH` for both if they should share an index. With the default `:memory:` database, each process has its own in-memory index.
 
 ## Authentication and authorization
 
