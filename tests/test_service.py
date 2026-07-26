@@ -240,10 +240,27 @@ def test_stale_identity_rejects_before_any_embedding_call(tmp_path):
         lambda: service.ingest("Second", "text"),
         lambda: service.update(document["id"], "Updated", "text"),
         lambda: service.search("text"),
+        lambda: service.delete_document(document["id"]),
     ):
         with pytest.raises(ValueError, match="configuration"):
             operation()
     assert calls == 0
+    assert service.get_document(document["id"])["id"] == document["id"]
+
+
+def test_delete_rechecks_embedding_identity_within_transaction(tmp_path):
+    store = SQLiteStore(str(tmp_path / "index.sqlite3"))
+    service = RAGService(store, FastEmbedEmbedder("first"), _OneChunk())
+    service.embedder.embed = lambda texts: [[1.0] for _ in texts]
+    document = service.ingest("First", "text")
+    store.connection.execute("UPDATE index_metadata SET embedding_model = 'stale'")
+    store.connection.commit()
+
+    with pytest.raises(ValueError, match="configuration"):
+        store.delete_document(
+            document["id"], expected_embedding_identity=service._embedding_identity
+        )
+    assert store.get_document(document["id"])["id"] == document["id"]
 
 
 def test_persistent_index_rejects_builtin_embedder_subclass(tmp_path):

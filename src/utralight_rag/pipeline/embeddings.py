@@ -130,6 +130,8 @@ class FastEmbedEmbedder(BaseEmbedder):
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         inputs = list(texts)
+        if not inputs:
+            return []
         try:
             vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
         except (AttributeError, TypeError, ValueError) as exc:

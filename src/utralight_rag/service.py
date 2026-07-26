@@ -138,4 +138,7 @@ class RAGService:
         return self.store.get_document(document_id)
 
     def delete_document(self, document_id: str) -> None:
-        self.store.delete_document(document_id)
+        self.store.preflight_embedding_configuration(self._embedding_identity)
+        self.store.delete_document(
+            document_id, expected_embedding_identity=self._embedding_identity
+        )

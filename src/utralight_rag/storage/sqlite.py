@@ -10,6 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from numbers import Real
 from typing import Any, Callable, Iterable, TypeVar
 
 import sqlite_vec
@@ -119,21 +120,25 @@ class SQLiteStore:
         return json.loads(value) if value else {}
 
     @staticmethod
-    def _validate_embeddings(chunks: list[str], embeddings: list[list[float]]) -> None:
+    def _normalize_vector(vector: list[float]) -> list[float]:
+        if any(
+            isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value)
+            for value in vector
+        ):
+            raise ValueError("Embeddings must contain only finite numbers")
+        return [float(value) for value in vector]
+
+    @classmethod
+    def _validate_embeddings(
+        cls, chunks: list[str], embeddings: list[list[float]]
+    ) -> list[list[float]]:
         if len(chunks) != len(embeddings):
             raise ValueError("Every chunk must have one embedding")
         if embeddings:
             dimension = len(embeddings[0])
             if dimension == 0 or any(len(vector) != dimension for vector in embeddings):
                 raise ValueError("All embeddings must have the same non-zero dimension")
-            try:
-                finite = all(
-                    math.isfinite(float(value)) for vector in embeddings for value in vector
-                )
-            except (TypeError, ValueError):
-                finite = False
-            if not finite:
-                raise ValueError("Embeddings must contain only finite numbers")
+        return [cls._normalize_vector(vector) for vector in embeddings]
 
     @_synchronized
     def create_document(
@@ -149,7 +154,7 @@ class SQLiteStore:
         document_id = document_id or str(uuid.uuid4())
         chunks = list(chunks)
         embeddings = list(embeddings)
-        self._validate_embeddings(chunks, embeddings)
+        embeddings = self._validate_embeddings(chunks, embeddings)
         now = self._now()
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
@@ -302,7 +307,7 @@ class SQLiteStore:
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
         chunks, embeddings = list(chunks), list(embeddings)
-        self._validate_embeddings(chunks, embeddings)
+        embeddings = self._validate_embeddings(chunks, embeddings)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             if (
@@ -342,7 +347,11 @@ class SQLiteStore:
         return self.get_document(document_id)
 
     @_synchronized
-    def delete_document(self, document_id: str) -> None:
+    def delete_document(
+        self,
+        document_id: str,
+        expected_embedding_identity: tuple[str, str, str] | None = None,
+    ) -> None:
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             if (
@@ -352,6 +361,7 @@ class SQLiteStore:
                 is None
             ):
                 raise DocumentNotFoundError(document_id)
+            self._require_embedding_configuration(expected_embedding_identity)
             ids = [
                 row[0]
                 for row in self.connection.execute(
@@ -372,6 +382,9 @@ class SQLiteStore:
         filter_metadata: dict[str, Any] | None = None,
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> list[dict[str, Any]]:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
+            raise ValueError("top_k must be a positive integer")
+        vector = self._normalize_vector(vector)
         self._require_embedding_configuration(expected_embedding_identity)
         if self._vector_dimension is None:
             self._load_vector_dimension()

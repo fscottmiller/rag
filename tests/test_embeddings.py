@@ -63,6 +63,8 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
     embedder = create_embedder("fastembed", "test-model")
     assert constructed == []
+    assert embedder.embed([]) == []
+    assert constructed == []
     assert embedder.embed(["one", "two"]) == [[1.0, 2.0], [1.0, 2.0]]
     assert constructed == ["test-model"]
 

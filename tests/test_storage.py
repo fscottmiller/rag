@@ -101,6 +101,9 @@ def test_storage_rejects_mismatched_or_empty_embeddings():
         store.create_document("Bad", "text", {}, ["one"], [[float("nan")]])
     with pytest.raises(ValueError, match="finite"):
         store.create_document("Bad", "text", {}, ["one"], [["not-a-number"]])
+    for value in (True, "1.0"):
+        with pytest.raises(ValueError, match="finite"):
+            store.create_document("Bad", "text", {}, ["one"], [[value]])
     store.close()
 
 
@@ -144,4 +147,20 @@ def test_search_rejects_wrong_embedding_dimension_and_empty_index_filter():
         store.search([1.0], 1)
     store.delete_document(created["id"])
     assert store.search([1.0, 0.0], 1, {"group": "none"}) == []
+    store.close()
+
+
+@pytest.mark.parametrize("vector", [[float("nan")], [float("inf")], [True], ["1.0"]])
+def test_search_rejects_invalid_embedding_coordinates(vector):
+    store = SQLiteStore()
+    with pytest.raises(ValueError, match="finite"):
+        store.search(vector, 1)
+    store.close()
+
+
+@pytest.mark.parametrize("top_k", [0, -1, True, 1.5])
+def test_search_rejects_non_positive_or_non_integer_top_k(top_k):
+    store = SQLiteStore()
+    with pytest.raises(ValueError, match="positive integer"):
+        store.search([1.0], top_k)
     store.close()
