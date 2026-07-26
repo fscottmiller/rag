@@ -169,6 +169,7 @@ def test_mcp_rejects_untrusted_origin_for_wildcard_host(service):
         "http://mcp.example.com",
         "https://mcp.example.com:444",
         "https://sibling.example.com",
+        "https://[",
     ],
 )
 def test_mcp_rejects_cross_origin_for_wildcard_host(service, origin):

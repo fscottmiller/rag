@@ -81,7 +81,9 @@ def test_rest_rejects_same_host_with_different_scheme(service):
     assert service.list_documents() == []
 
 
-@pytest.mark.parametrize("origin", ["https://user@testserver", "https://testserver:bad"])
+@pytest.mark.parametrize(
+    "origin", ["https://user@testserver", "https://testserver:bad", "https://["]
+)
 def test_rest_rejects_malformed_origin(service, origin):
     with TestClient(create_app(service), base_url="https://testserver") as client:
         response = client.post(
