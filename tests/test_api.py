@@ -69,6 +69,17 @@ def test_rest_rejects_cross_origin_mutations_in_open_mode(service):
     assert service.list_documents() == []
 
 
+def test_rest_rejects_same_host_with_different_scheme(service):
+    with TestClient(create_app(service), base_url="https://testserver") as client:
+        response = client.post(
+            "/documents",
+            json={"title": "Injected", "content": "cross-scheme"},
+            headers={"Origin": "http://testserver"},
+        )
+    assert response.status_code == 403
+    assert service.list_documents() == []
+
+
 def test_rest_rejects_documents_over_configured_limit(service):
     limited = RAGService(
         SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)

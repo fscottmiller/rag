@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
@@ -16,6 +17,22 @@ from ..auth import AuthenticationError, AuthorizationError, Authorizer
 from ..service import DocumentTooLargeError, RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
+
+
+def _same_origin(origin: str, request: Request) -> bool:
+    parsed = urlsplit(origin)
+    if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return False
+    try:
+        origin_port = parsed.port or {"http": 80, "https": 443}.get(parsed.scheme)
+    except ValueError:
+        return False
+    request_port = request.url.port or {"http": 80, "https": 443}.get(request.url.scheme)
+    return (parsed.scheme, parsed.hostname, origin_port) == (
+        request.url.scheme,
+        request.url.hostname,
+        request_port,
+    )
 
 
 class BodySizeLimitMiddleware:
@@ -89,9 +106,7 @@ def create_app(
         if action == "write" and authorizer.mode == "none":
             origin = request.headers.get("origin")
             if origin:
-                origin_host = origin.split("://", 1)[-1]
-                request_host = request.headers.get("host", "")
-                if origin_host != request_host:
+                if not _same_origin(origin, request):
                     raise HTTPException(
                         status_code=403,
                         detail="Cross-origin document mutations are not allowed",

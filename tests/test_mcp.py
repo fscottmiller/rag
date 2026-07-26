@@ -109,3 +109,48 @@ def test_mcp_accepts_trusted_host_with_nondefault_port(service):
             headers={"accept": "application/json, text/event-stream"},
         )
         assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("trusted_hosts", "base_url"),
+    [("*", "https://any.example"), ("*.example.com", "https://mcp.example.com")],
+)
+def test_mcp_supports_starlette_trusted_host_patterns(service, trusted_hosts, base_url):
+    public_service = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, trusted_hosts=(trusted_hosts,)),
+    )
+    with TestClient(create_combined_app(public_service), base_url=base_url) as client:
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream", "origin": base_url},
+        )
+    assert response.status_code == 200
+
+
+def test_mcp_rejects_untrusted_origin_for_wildcard_host(service):
+    public_service = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, trusted_hosts=("*.example.com",)),
+    )
+    with TestClient(create_combined_app(public_service), base_url="https://mcp.example.com") as client:
+        response = client.post(
+            "/mcp",
+            json={},
+            headers={"accept": "application/json", "origin": "https://evil.example"},
+        )
+    assert response.status_code == 403
