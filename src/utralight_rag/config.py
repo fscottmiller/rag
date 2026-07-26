@@ -44,7 +44,17 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         provider = os.getenv("RAG_EMBEDDING_PROVIDER")
-        api_key = os.getenv("RAG_EMBEDDING_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+        api_key = next(
+            (
+                key.strip()
+                for key in (
+                    os.getenv("RAG_EMBEDDING_API_KEY", ""),
+                    os.getenv("OPENAI_API_KEY", ""),
+                )
+                if key.strip()
+            ),
+            "",
+        )
         if provider is None:
             provider = "openai-compatible" if api_key.strip() else "fastembed"
         normalized_provider = provider.lower().replace("_", "-")

@@ -76,7 +76,7 @@ def test_ollama_uses_common_openai_compatible_settings(monkeypatch):
 
 def test_openai_compatible_settings_have_safe_defaults_and_key_fallback(monkeypatch):
     monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("OPENAI_API_KEY", "fallback-key")
+    monkeypatch.setenv("OPENAI_API_KEY", " fallback-key ")
     settings = Settings.from_env()
     assert settings.embedding_model == "text-embedding-3-small"
     assert settings.embedding_url == "https://api.openai.com/v1/embeddings"
@@ -92,6 +92,18 @@ def test_unset_embedding_provider_uses_available_api_key(monkeypatch):
     assert settings.embedding_provider == "openai-compatible"
     assert settings.embedding_model == "text-embedding-3-small"
     assert settings.embedding_api_key == "fallback-key"
+
+
+def test_whitespace_embedding_key_falls_back_to_openai_key(monkeypatch):
+    monkeypatch.delenv("RAG_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.setenv("RAG_EMBEDDING_API_KEY", "  \t")
+    monkeypatch.setenv("OPENAI_API_KEY", "fallback-key")
+    settings = Settings.from_env()
+    assert settings.embedding_provider == "openai-compatible"
+    assert settings.embedding_api_key == "fallback-key"
+
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "openai-compatible")
+    assert Settings.from_env().embedding_api_key == "fallback-key"
 
 
 def test_unset_embedding_provider_without_api_key_uses_fastembed(monkeypatch):
