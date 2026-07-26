@@ -286,6 +286,11 @@ class SQLiteStore:
             self._raise_embedding_configuration_error()
 
     @_synchronized
+    def preflight_embedding_configuration(self, expected: tuple[str, str, str] | None) -> None:
+        """Reject stale embedding identities before provider work begins."""
+        self._require_embedding_configuration(expected)
+
+    @_synchronized
     def replace_document(
         self,
         document_id: str,
@@ -296,17 +301,17 @@ class SQLiteStore:
         embeddings: Iterable[list[float]],
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
-        if (
-            self.connection.execute(
-                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-            ).fetchone()
-            is None
-        ):
-            raise DocumentNotFoundError(document_id)
         chunks, embeddings = list(chunks), list(embeddings)
         self._validate_embeddings(chunks, embeddings)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+                ).fetchone()
+                is None
+            ):
+                raise DocumentNotFoundError(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
             if embeddings:
                 self._ensure_vector_table(len(embeddings[0]))
@@ -338,14 +343,15 @@ class SQLiteStore:
 
     @_synchronized
     def delete_document(self, document_id: str) -> None:
-        if (
-            self.connection.execute(
-                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-            ).fetchone()
-            is None
-        ):
-            raise DocumentNotFoundError(document_id)
         with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+                ).fetchone()
+                is None
+            ):
+                raise DocumentNotFoundError(document_id)
             ids = [
                 row[0]
                 for row in self.connection.execute(

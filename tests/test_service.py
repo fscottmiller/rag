@@ -220,6 +220,32 @@ def test_two_live_services_reject_stale_identity_before_vector_table_creation(tm
         first.search("text")
 
 
+def test_stale_identity_rejects_before_any_embedding_call(tmp_path):
+    service = RAGService(
+        SQLiteStore(str(tmp_path / "index.sqlite3")), FastEmbedEmbedder("first"), _OneChunk()
+    )
+    service.embedder.embed = lambda texts: [[1.0] for _ in texts]
+    document = service.ingest("First", "text")
+    service.store.connection.execute("UPDATE index_metadata SET embedding_model = 'stale'")
+    service.store.connection.commit()
+    calls = 0
+
+    def embed(texts):
+        nonlocal calls
+        calls += 1
+        return [[1.0] for _ in texts]
+
+    service.embedder.embed = embed
+    for operation in (
+        lambda: service.ingest("Second", "text"),
+        lambda: service.update(document["id"], "Updated", "text"),
+        lambda: service.search("text"),
+    ):
+        with pytest.raises(ValueError, match="configuration"):
+            operation()
+    assert calls == 0
+
+
 def test_persistent_index_rejects_builtin_embedder_subclass(tmp_path):
     class AlteredFastEmbedder(FastEmbedEmbedder):
         def embed(self, texts):

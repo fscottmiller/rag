@@ -67,6 +67,16 @@ def test_replace_and_delete_remove_old_vectors():
     store.close()
 
 
+def test_replace_and_delete_preserve_not_found_contract_for_empty_documents():
+    store = SQLiteStore()
+    store.create_document("Empty", "", {}, [], [], document_id="empty")
+    store.replace_document("empty", "Still empty", "", {}, [], [])
+    store.delete_document("empty")
+    with pytest.raises(DocumentNotFoundError):
+        store.replace_document("missing", "Missing", "", {}, [], [])
+    store.close()
+
+
 def test_search_refreshes_vector_dimension_for_late_writer(tmp_path):
     database = tmp_path / "shared.sqlite3"
     reader = SQLiteStore(str(database))

@@ -83,6 +83,7 @@ class RAGService:
     ) -> dict[str, Any]:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
+        self.store.preflight_embedding_configuration(self._embedding_identity)
         chunks, embeddings = self._prepare(content)
         return self.store.create_document(
             title,
@@ -103,6 +104,7 @@ class RAGService:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
         self.store.get_document(document_id)
+        self.store.preflight_embedding_configuration(self._embedding_identity)
         chunks, embeddings = self._prepare(content)
         return self.store.replace_document(
             document_id,
@@ -121,6 +123,7 @@ class RAGService:
             raise ValueError("query must contain at least one non-whitespace character")
         if top_k < 1 or top_k > 100:
             raise ValueError("top_k must be between 1 and 100")
+        self.store.preflight_embedding_configuration(self._embedding_identity)
         return self.store.search(
             self.embedder.embed_one(query),
             top_k,

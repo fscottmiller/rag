@@ -67,6 +67,43 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
     assert constructed == ["test-model"]
 
 
+@pytest.mark.parametrize(
+    "vectors",
+    [[], [[]], [[1.0], [1.0, 2.0]], [["invalid"]], [[float("nan")]]],
+)
+def test_fastembed_rejects_malformed_vectors(monkeypatch, vectors):
+    class Vector:
+        def __init__(self, value):
+            self.value = value
+
+        def tolist(self):
+            return self.value
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            pass
+
+        def embed(self, texts):
+            return (Vector(vector) for vector in vectors)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+        FastEmbedEmbedder("test-model").embed(["one"])
+
+
+def test_fastembed_rejects_vectors_without_tolist(monkeypatch):
+    class TextEmbedding:
+        def __init__(self, model_name):
+            pass
+
+        def embed(self, texts):
+            return [object()]
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+        FastEmbedEmbedder("test-model").embed(["one"])
+
+
 def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypatch):
     constructed = []
     start = threading.Barrier(3)

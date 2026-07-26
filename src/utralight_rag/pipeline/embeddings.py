@@ -66,6 +66,22 @@ def _configuration(provider: str, model: str, **settings: object) -> EmbeddingCo
     return EmbeddingConfiguration(provider, model, fingerprint)
 
 
+def _validated_embeddings(vectors: list[object], expected_count: int) -> list[list[float]]:
+    if len(vectors) != expected_count or not all(isinstance(vector, list) for vector in vectors):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
+    try:
+        embeddings = [[float(value) for value in vector] for vector in vectors]
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Embedding provider returned invalid embeddings") from exc
+    if embeddings and (
+        not embeddings[0]
+        or any(len(vector) != len(embeddings[0]) for vector in embeddings)
+        or any(not math.isfinite(value) for vector in embeddings for value in vector)
+    ):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
+    return embeddings
+
+
 class BaseEmbedder(ABC):
     @abstractmethod
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
@@ -113,7 +129,15 @@ class FastEmbedEmbedder(BaseEmbedder):
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return [embedding.tolist() for embedding in self.model.embed(list(texts))]
+        inputs = list(texts)
+        try:
+            vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
+        try:
+            return _validated_embeddings(vectors, len(inputs))
+        except RuntimeError as exc:
+            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
 
 
 class OpenAICompatibleEmbedder(BaseEmbedder):
@@ -208,12 +232,13 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise RuntimeError("Embedding endpoint returned invalid embeddings")
         data = sorted(data, key=lambda item: item["index"])
         try:
-            embeddings = [[float(value) for value in item["embedding"]] for item in data]
-        except (KeyError, TypeError, ValueError) as exc:
+            vectors = [item["embedding"] for item in data]
+        except KeyError as exc:
             raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
-        if any(not all(math.isfinite(value) for value in vector) for vector in embeddings):
-            raise RuntimeError("Embedding endpoint returned invalid embeddings")
-        return embeddings
+        try:
+            return _validated_embeddings(vectors, len(inputs))
+        except RuntimeError as exc:
+            raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
 
 
 def create_embedder(
