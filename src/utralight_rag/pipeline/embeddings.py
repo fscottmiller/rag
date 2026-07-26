@@ -6,7 +6,6 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any, Sequence
-from urllib.parse import urlparse
 
 
 class BaseEmbedder(ABC):
@@ -38,6 +37,8 @@ class SentenceTransformerEmbedder(BaseEmbedder):
 class OpenAICompatibleEmbedder(BaseEmbedder):
     """Embed text through an OpenAI-compatible /v1/embeddings endpoint."""
 
+    max_response_bytes = 64 * 1024 * 1024
+
     def __init__(
         self,
         model: str,
@@ -51,10 +52,6 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             raise ValueError("embedding model must not be empty")
         if not url.strip():
             raise ValueError("embedding URL must not be empty")
-        url = url.strip()
-        parsed_url = urlparse(url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise ValueError("embedding URL must use an http or https scheme")
         if timeout <= 0:
             raise ValueError("embedding timeout must be positive")
         if dimensions is not None and dimensions < 1:
@@ -96,11 +93,11 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             method="POST",
         )
         try:
-            # The constructor restricts this operator-configured URL to HTTP(S).
-            with urllib.request.urlopen(  # nosec B310
-                request, timeout=self.timeout
-            ) as response:
-                body = json.loads(response.read())
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read(self.max_response_bytes + 1)
+                if len(raw) > self.max_response_bytes:
+                    raise RuntimeError("Embedding endpoint response exceeds size limit")
+                body = json.loads(raw)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             raise RuntimeError(f"Embedding endpoint returned HTTP {exc.code}: {detail}") from exc

@@ -82,3 +82,30 @@ def test_combined_app_mounts_streamable_http_over_the_same_service(service):
         assert response.status_code == 200
         assert response.headers["mcp-session-id"]
         assert '"serverInfo"' in response.text
+
+
+def test_mcp_accepts_trusted_host_with_nondefault_port(service):
+    public_service = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, trusted_hosts=("localhost",)),
+    )
+    app = create_combined_app(public_service)
+
+    with TestClient(app, base_url="http://localhost:8000") as client:
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream"},
+        )
+        assert response.status_code == 200

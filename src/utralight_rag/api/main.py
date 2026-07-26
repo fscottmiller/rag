@@ -88,11 +88,14 @@ def create_app(
     def require(request: Request, action: str) -> None:
         if action == "write" and authorizer.mode == "none":
             origin = request.headers.get("origin")
-            request_origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
-            if origin and origin != request_origin:
-                raise HTTPException(
-                    status_code=403, detail="Cross-origin document mutations are not allowed"
-                )
+            if origin:
+                origin_host = origin.split("://", 1)[-1]
+                request_host = request.headers.get("host", "")
+                if origin_host != request_host:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Cross-origin document mutations are not allowed",
+                    )
         try:
             authorizer.authorize(request.headers, action)
         except AuthenticationError as exc:
