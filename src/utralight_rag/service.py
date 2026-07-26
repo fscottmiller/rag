@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import Settings
 from .pipeline.chunking import BaseChunker, ChonkieChunker
-from .pipeline.embeddings import BaseEmbedder, create_embedder
+from .pipeline.embeddings import BaseEmbedder, create_embedder, embedding_configuration
 from .storage.sqlite import SQLiteStore
 
 
@@ -24,10 +24,7 @@ class RAGService:
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.store = store or SQLiteStore(self.settings.database_path)
-        self.store.ensure_embedding_configuration(
-            self.settings.embedding_provider, self.settings.embedding_model
-        )
-        self.embedder = embedder or create_embedder(
+        self.embedder = embedder if embedder is not None else create_embedder(
             self.settings.embedding_provider,
             self.settings.embedding_model,
             self.settings.embedding_url,
@@ -36,9 +33,19 @@ class RAGService:
             self.settings.embedding_dimensions,
             self.settings.embedding_batch_size,
         )
-        self.chunker = chunker or ChonkieChunker(
+        self.chunker = chunker if chunker is not None else ChonkieChunker(
             self.settings.chunker, self.settings.chunk_size, self.settings.chunk_overlap
         )
+        configuration = embedding_configuration(self.embedder)
+        if configuration is None:
+            if self.store.is_persistent():
+                raise ValueError(
+                    "Persistent indexes require a built-in embedder with a known identity"
+                )
+        else:
+            self.store.ensure_embedding_configuration(
+                configuration.provider, configuration.model, configuration.fingerprint
+            )
 
     def _prepare(self, content: str) -> tuple[list[str], list[list[float]]]:
         if len(content.encode("utf-8")) > self.settings.max_document_bytes:

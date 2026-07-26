@@ -5,9 +5,52 @@ import math
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from hashlib import sha256
 from threading import Lock
 from typing import Any, Sequence
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
+
+_PROVIDER_ALIASES = {
+    "openai": "openai-compatible",
+    "openai-compatible-api": "openai-compatible",
+    "sentence-transformer": "sentence-transformers",
+    "transformers": "sentence-transformers",
+}
+
+
+def canonical_provider(provider: str) -> str:
+    normalized = provider.lower().replace("_", "-")
+    return _PROVIDER_ALIASES.get(normalized, normalized)
+
+
+@dataclass(frozen=True)
+class EmbeddingConfiguration:
+    provider: str
+    model: str
+    fingerprint: str
+
+
+def _endpoint_digest(url: str) -> str:
+    parsed = urlsplit(url)
+    # Userinfo is credentials, not index identity. Fragments are not sent in HTTP requests.
+    endpoint = urlunsplit((
+        parsed.scheme.lower(),
+        parsed.netloc.rsplit("@", 1)[-1].lower(),
+        parsed.path,
+        parsed.query,
+        "",
+    ))
+    return sha256(endpoint.encode()).hexdigest()
+
+
+def _configuration(provider: str, model: str, **settings: object) -> EmbeddingConfiguration:
+    provider = canonical_provider(provider)
+    values = {"provider": provider, "model": model, **settings}
+    fingerprint = sha256(
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return EmbeddingConfiguration(provider, model, fingerprint)
 
 
 class BaseEmbedder(ABC):
@@ -21,6 +64,8 @@ class BaseEmbedder(ABC):
 
 class SentenceTransformerEmbedder(BaseEmbedder):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        if not model_name.strip():
+            raise ValueError("embedding model must not be empty")
         self.model_name = model_name
         self._model = None
 
@@ -71,6 +116,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         timeout: float = 60.0,
         dimensions: int | None = None,
         batch_size: int = 64,
+        provider: str = "openai-compatible",
     ) -> None:
         if not model.strip():
             raise ValueError("embedding model must not be empty")
@@ -92,6 +138,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         self.timeout = timeout
         self.dimensions = dimensions
         self.batch_size = batch_size
+        self.provider = canonical_provider(provider)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         inputs = list(texts)
@@ -163,10 +210,10 @@ def create_embedder(
     embedding_dimensions: int | None = None,
     embedding_batch_size: int = 64,
 ) -> BaseEmbedder:
-    normalized = provider.lower().replace("_", "-")
+    normalized = canonical_provider(provider)
     if normalized == "fastembed":
         return FastEmbedEmbedder(model)
-    if normalized in {"sentence-transformers", "sentence-transformer", "transformers"}:
+    if normalized == "sentence-transformers":
         return SentenceTransformerEmbedder(model)
     if normalized == "ollama":
         return OpenAICompatibleEmbedder(
@@ -176,8 +223,9 @@ def create_embedder(
             embedding_timeout,
             embedding_dimensions,
             embedding_batch_size,
+            normalized,
         )
-    if normalized in {"openai", "openai-compatible", "openai-compatible-api"}:
+    if normalized == "openai-compatible":
         if not embedding_api_key.strip():
             raise ValueError("embedding API key must not be empty for external providers")
         return OpenAICompatibleEmbedder(
@@ -187,5 +235,22 @@ def create_embedder(
             embedding_timeout,
             embedding_dimensions,
             embedding_batch_size,
+            normalized,
         )
     raise ValueError(f"Unknown embedding provider: {provider}")
+
+
+def embedding_configuration(embedder: BaseEmbedder) -> EmbeddingConfiguration | None:
+    """Return a persistent index identity for built-in embedders only."""
+    if isinstance(embedder, FastEmbedEmbedder):
+        return _configuration("fastembed", embedder.model_name)
+    if isinstance(embedder, SentenceTransformerEmbedder):
+        return _configuration("sentence-transformers", embedder.model_name)
+    if isinstance(embedder, OpenAICompatibleEmbedder):
+        return _configuration(
+            embedder.provider,
+            embedder.model,
+            dimensions=embedder.dimensions,
+            endpoint=_endpoint_digest(embedder.url),
+        )
+    return None

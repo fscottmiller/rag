@@ -47,7 +47,7 @@ Use a separate database path and port for every instance. This keeps vector spac
 
 ### Upgrade existing indexes
 
-Indexes created before the FastEmbed default did not record their embedding model. Move or delete a nonempty existing database and re-ingest its documents before starting this version; this prevents 384-dimensional legacy `all-MiniLM-L6-v2` vectors from being mixed with `BAAI/bge-small-en-v1.5` vectors. New and empty indexes record the provider and model automatically.
+Indexes created before the FastEmbed default did not record their embedding identity. Move or delete a nonempty existing database and re-ingest its documents before starting this version; this prevents 384-dimensional legacy `all-MiniLM-L6-v2` vectors from being mixed with `BAAI/bge-small-en-v1.5` vectors. New indexes record the canonical provider, model, dimensions, and a non-secret endpoint fingerprint; empty indexes can adopt a new identity.
 
 ## REST API
 

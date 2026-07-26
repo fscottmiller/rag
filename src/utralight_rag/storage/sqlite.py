@@ -66,10 +66,20 @@ class SQLiteStore:
             CREATE TABLE IF NOT EXISTS index_metadata (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 embedding_provider TEXT NOT NULL,
-                embedding_model TEXT NOT NULL
+                embedding_model TEXT NOT NULL,
+                embedding_fingerprint TEXT
             );
             """
         )
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(index_metadata)")}
+        if "embedding_fingerprint" not in columns:
+            try:
+                self.connection.execute(
+                    "ALTER TABLE index_metadata ADD COLUMN embedding_fingerprint TEXT"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.commit()
 
@@ -210,37 +220,54 @@ class SQLiteStore:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
     @_synchronized
-    def ensure_embedding_configuration(self, provider: str, model: str) -> None:
-        """Bind a nonempty index to its embedding provider and model."""
-        provider = provider.lower().replace("_", "-")
-        existing = self.connection.execute(
-            "SELECT embedding_provider, embedding_model FROM index_metadata WHERE id = 1"
-        ).fetchone()
-        if existing is not None:
-            if tuple(existing) != (provider, model):
-                self._raise_embedding_configuration_error()
-            return
-        if self._chunk_count_all():
-            raise ValueError(
-                "Index has no embedding provider/model metadata; reindex the database "
-                "before using it with the current embedding model."
+    def is_persistent(self) -> bool:
+        return bool(
+            next(
+                (
+                    row[2]
+                    for row in self.connection.execute("PRAGMA database_list")
+                    if row[1] == "main"
+                ),
+                "",
             )
+        )
+
+    @_synchronized
+    def ensure_embedding_configuration(self, provider: str, model: str, fingerprint: str) -> None:
+        """Bind an index to its complete embedding identity."""
         with self.connection:
-            self.connection.execute(
-                "INSERT OR IGNORE INTO index_metadata "
-                "(id, embedding_provider, embedding_model) VALUES (1, ?, ?)",
-                (provider, model),
-            )
-        existing = self.connection.execute(
-            "SELECT embedding_provider, embedding_model FROM index_metadata WHERE id = 1"
-        ).fetchone()
-        if existing is None or tuple(existing) != (provider, model):
-            self._raise_embedding_configuration_error()
+            self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute(
+                "SELECT embedding_provider, embedding_model, embedding_fingerprint "
+                "FROM index_metadata WHERE id = 1"
+            ).fetchone()
+            if existing is not None and tuple(existing) == (provider, model, fingerprint):
+                return
+            if self._chunk_count_all():
+                if existing is None:
+                    raise ValueError(
+                        "Index has no embedding configuration metadata; reindex the database "
+                        "before using it with the current embedding model."
+                    )
+                self._raise_embedding_configuration_error()
+            if existing is None:
+                self.connection.execute(
+                    "INSERT INTO index_metadata "
+                    "(id, embedding_provider, embedding_model, embedding_fingerprint) "
+                    "VALUES (1, ?, ?, ?)",
+                    (provider, model, fingerprint),
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE index_metadata SET embedding_provider=?, embedding_model=?, "
+                    "embedding_fingerprint=? WHERE id=1",
+                    (provider, model, fingerprint),
+                )
 
     @staticmethod
     def _raise_embedding_configuration_error() -> None:
         raise ValueError(
-            "Index embedding provider/model does not match this service; "
+            "Index embedding configuration does not match this service; "
             "reindex the database with the configured embedding model."
         )
 
