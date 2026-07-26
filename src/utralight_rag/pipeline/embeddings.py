@@ -7,6 +7,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from hashlib import sha256
+from numbers import Real
 from threading import Lock
 from typing import Any, Sequence
 from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
@@ -69,6 +70,12 @@ def _configuration(provider: str, model: str, **settings: object) -> EmbeddingCo
 def _validated_embeddings(vectors: list[object], expected_count: int) -> list[list[float]]:
     if len(vectors) != expected_count or not all(isinstance(vector, list) for vector in vectors):
         raise RuntimeError("Embedding provider returned invalid embeddings")
+    if any(
+        isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value)
+        for vector in vectors
+        for value in vector
+    ):
+        raise RuntimeError("Embedding provider returned invalid embeddings")
     try:
         embeddings = [[float(value) for value in vector] for vector in vectors]
     except (TypeError, ValueError) as exc:
@@ -107,7 +114,13 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return self.model.encode(list(texts), convert_to_numpy=True).tolist()
+        inputs = list(texts)
+        try:
+            return _validated_embeddings(
+                self.model.encode(inputs, convert_to_numpy=True).tolist(), len(inputs)
+            )
+        except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError("SentenceTransformers returned invalid embeddings") from exc
 
 
 class FastEmbedEmbedder(BaseEmbedder):

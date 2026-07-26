@@ -67,6 +67,18 @@ def test_replace_and_delete_remove_old_vectors():
     store.close()
 
 
+def test_empty_index_identity_replacement_drops_old_vector_schema(tmp_path):
+    database = tmp_path / "index.sqlite3"
+    first = SQLiteStore(str(database))
+    first.ensure_embedding_configuration("fastembed", "first", "first")
+    document = first.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.delete_document(document["id"])
+    first.ensure_embedding_configuration("fastembed", "second", "second")
+    first.create_document("Second", "text", {}, ["text"], [[1.0, 0.0]])
+    assert first.search([1.0, 0.0], 1)[0]["title"] == "Second"
+    first.close()
+
+
 def test_replace_and_delete_preserve_not_found_contract_for_empty_documents():
     store = SQLiteStore()
     store.create_document("Empty", "", {}, [], [], document_id="empty")
@@ -158,9 +170,9 @@ def test_search_rejects_invalid_embedding_coordinates(vector):
     store.close()
 
 
-@pytest.mark.parametrize("top_k", [0, -1, True, 1.5])
+@pytest.mark.parametrize("top_k", [0, -1, True, 1.5, 101, 10**100])
 def test_search_rejects_non_positive_or_non_integer_top_k(top_k):
     store = SQLiteStore()
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="between 1 and 100"):
         store.search([1.0], top_k)
     store.close()

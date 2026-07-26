@@ -71,7 +71,7 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
 
 @pytest.mark.parametrize(
     "vectors",
-    [[], [[]], [[1.0], [1.0, 2.0]], [["invalid"]], [[float("nan")]]],
+    [[], [[]], [[1.0], [1.0, 2.0]], [["1.0"]], [[float("nan")]], [[True]]],
 )
 def test_fastembed_rejects_malformed_vectors(monkeypatch, vectors):
     class Vector:

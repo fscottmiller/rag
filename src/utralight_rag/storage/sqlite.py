@@ -107,6 +107,15 @@ class SQLiteStore:
         )
         self._vector_dimension = dimension
 
+    def _drop_empty_vector_table(self) -> None:
+        self._load_vector_dimension()
+        if self._vector_dimension is None:
+            return
+        if self.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]:
+            raise ValueError("Cannot replace embedding identity while vector data remains")
+        self.connection.execute("DROP TABLE vec_chunks")
+        self._vector_dimension = None
+
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -259,6 +268,7 @@ class SQLiteStore:
                         "before using it with the current embedding model."
                     )
                 self._raise_embedding_configuration_error()
+            self._drop_empty_vector_table()
             if existing is None:
                 self.connection.execute(
                     "INSERT INTO index_metadata "
@@ -382,8 +392,8 @@ class SQLiteStore:
         filter_metadata: dict[str, Any] | None = None,
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
-            raise ValueError("top_k must be a positive integer")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be between 1 and 100")
         vector = self._normalize_vector(vector)
         self._require_embedding_configuration(expected_embedding_identity)
         if self._vector_dimension is None:

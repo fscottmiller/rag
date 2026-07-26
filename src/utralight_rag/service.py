@@ -121,7 +121,7 @@ class RAGService:
     ) -> list[dict[str, Any]]:
         if not query.strip():
             raise ValueError("query must contain at least one non-whitespace character")
-        if top_k < 1 or top_k > 100:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
             raise ValueError("top_k must be between 1 and 100")
         self.store.preflight_embedding_configuration(self._embedding_identity)
         return self.store.search(
