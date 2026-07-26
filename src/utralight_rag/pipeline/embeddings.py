@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from threading import Lock
 from typing import Any, Sequence
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
 
 _PROVIDER_ALIASES = {
     "openai": "openai-compatible",
@@ -34,14 +34,27 @@ class EmbeddingConfiguration:
 def _endpoint_digest(url: str) -> str:
     parsed = urlsplit(url)
     # Userinfo is credentials, not index identity. Fragments are not sent in HTTP requests.
-    endpoint = urlunsplit((
-        parsed.scheme.lower(),
-        parsed.netloc.rsplit("@", 1)[-1].lower(),
-        parsed.path,
-        parsed.query,
-        "",
-    ))
+    endpoint = urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.rsplit("@", 1)[-1].lower(),
+            parsed.path,
+            parsed.query,
+            "",
+        )
+    )
     return sha256(endpoint.encode()).hexdigest()
+
+
+def _has_query_credentials(query: str) -> bool:
+    return any(
+        "".join(character for character in name.lower() if character.isalnum()).endswith(
+            ("key", "token", "secret", "password", "credential", "signature")
+        )
+        or "".join(character for character in name.lower() if character.isalnum())
+        in {"auth", "authorization", "sig"}
+        for name, _ in parse_qsl(query, keep_blank_values=True)
+    )
 
 
 def _configuration(provider: str, model: str, **settings: object) -> EmbeddingConfiguration:
@@ -126,6 +139,8 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         parsed_url = urlparse(url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise ValueError("embedding URL must use an http or https scheme")
+        if "@" in parsed_url.netloc or _has_query_credentials(parsed_url.query):
+            raise ValueError("embedding URL must not contain credentials; use embedding API key")
         if timeout <= 0:
             raise ValueError("embedding timeout must be positive")
         if dimensions is not None and dimensions < 1:
@@ -242,11 +257,11 @@ def create_embedder(
 
 def embedding_configuration(embedder: BaseEmbedder) -> EmbeddingConfiguration | None:
     """Return a persistent index identity for built-in embedders only."""
-    if isinstance(embedder, FastEmbedEmbedder):
+    if type(embedder) is FastEmbedEmbedder:
         return _configuration("fastembed", embedder.model_name)
-    if isinstance(embedder, SentenceTransformerEmbedder):
+    if type(embedder) is SentenceTransformerEmbedder:
         return _configuration("sentence-transformers", embedder.model_name)
-    if isinstance(embedder, OpenAICompatibleEmbedder):
+    if type(embedder) is OpenAICompatibleEmbedder:
         return _configuration(
             embedder.provider,
             embedder.model,

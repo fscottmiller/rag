@@ -6,6 +6,11 @@ from utralight_rag.service import RAGService
 from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
+class _OneChunk:
+    def chunk(self, content):
+        return [content]
+
+
 def test_document_crud_and_cascade(service):
     created = service.ingest("Guide", "Python intro | SQLite storage", {"team": "search"})
     assert created["chunk_count"] == 2
@@ -201,9 +206,32 @@ def test_empty_index_can_replace_embedding_identity(tmp_path):
     assert model == "second"
 
 
+def test_two_live_services_reject_stale_identity_before_vector_table_creation(tmp_path):
+    database = tmp_path / "index.sqlite3"
+    first = RAGService(SQLiteStore(str(database)), FastEmbedEmbedder("first"), _OneChunk())
+    second = RAGService(SQLiteStore(str(database)), FastEmbedEmbedder("second"), _OneChunk())
+    first.embedder.embed = lambda texts: [[1.0] for _ in texts]
+    second.embedder.embed = lambda texts: [[1.0, 0.0] for _ in texts]
+
+    with pytest.raises(ValueError, match="configuration"):
+        first.ingest("First", "text")
+    second.ingest("Second", "text")
+    with pytest.raises(ValueError, match="configuration"):
+        first.search("text")
+
+
+def test_persistent_index_rejects_builtin_embedder_subclass(tmp_path):
+    class AlteredFastEmbedder(FastEmbedEmbedder):
+        def embed(self, texts):
+            return [[1.0] for _ in texts]
+
+    with pytest.raises(ValueError, match="known identity"):
+        RAGService(SQLiteStore(str(tmp_path / "index.sqlite3")), AlteredFastEmbedder(), _OneChunk())
+
+
 def test_equivalent_provider_aliases_and_endpoint_settings_share_identity(tmp_path):
     database = tmp_path / "index.sqlite3"
-    url = "https://user:password@embedding.example/v1/embeddings"
+    url = "https://embedding.example/v1/embeddings?api-version=2026-01-01"
     first = RAGService(
         SQLiteStore(str(database)),
         OpenAICompatibleEmbedder("model", url, "api-secret", dimensions=384, provider="openai"),
@@ -213,7 +241,6 @@ def test_equivalent_provider_aliases_and_endpoint_settings_share_identity(tmp_pa
         "SELECT embedding_provider, embedding_fingerprint FROM index_metadata"
     ).fetchone()
     assert fingerprint[0] == "openai-compatible"
-    assert "user" not in fingerprint[1] and "password" not in fingerprint[1]
     first.store.close()
     second = RAGService(
         SQLiteStore(str(database)),
@@ -223,6 +250,38 @@ def test_equivalent_provider_aliases_and_endpoint_settings_share_identity(tmp_pa
         object(),
     )
     assert second.store.connection.execute("SELECT COUNT(*) FROM index_metadata").fetchone()[0] == 1
+
+
+def test_embedding_endpoint_rejects_embedded_credentials():
+    for url in (
+        "https://user:password@embedding.example/v1/embeddings",
+        "https://embedding.example/v1/embeddings?api_key=secret",
+        "https://embedding.example/v1/embeddings?accessToken=secret",
+    ):
+        with pytest.raises(ValueError, match="credentials"):
+            OpenAICompatibleEmbedder("model", url, "api-secret")
+
+
+def test_embedding_endpoint_keeps_non_secret_query_parameters_in_identity(tmp_path):
+    database = tmp_path / "index.sqlite3"
+    first = RAGService(
+        SQLiteStore(str(database)),
+        OpenAICompatibleEmbedder(
+            "model", "https://embedding.example/v1/embeddings?api-version=2026-01-01", "key"
+        ),
+        object(),
+    )
+    first.store.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.store.close()
+
+    with pytest.raises(ValueError, match="configuration"):
+        RAGService(
+            SQLiteStore(str(database)),
+            OpenAICompatibleEmbedder(
+                "model", "https://embedding.example/v1/embeddings?api-version=2026-02-01", "key"
+            ),
+            object(),
+        )
 
 
 def test_external_endpoint_or_dimensions_change_index_identity(tmp_path):
