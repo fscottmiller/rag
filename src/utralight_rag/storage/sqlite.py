@@ -8,10 +8,11 @@ import re
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from functools import wraps
 from numbers import Real
-from typing import Any, Callable, Iterable, TypeVar
+from typing import Any, TypeVar
 
 import sqlite_vec
 
@@ -118,7 +119,7 @@ class SQLiteStore:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     @staticmethod
     def _metadata(value: dict[str, Any] | None) -> str:
@@ -175,7 +176,10 @@ class SQLiteStore:
                 "(id,title,content,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?)",
                 (document_id, title, content, self._metadata(metadata), now, now),
             )
-            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings)):
+            # strict=True documents (and enforces) an invariant already guaranteed by
+            # _validate_embeddings above, which raises ValueError on a length mismatch
+            # before this loop ever runs.
+            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings, strict=True)):
                 cursor = self.connection.execute(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
                     (document_id, ordinal, text, "{}"),
@@ -345,7 +349,10 @@ class SQLiteStore:
                 "UPDATE documents SET title=?, content=?, metadata=?, updated_at=? WHERE id=?",
                 (title, content, self._metadata(metadata), self._now(), document_id),
             )
-            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings)):
+            # strict=True documents (and enforces) an invariant already guaranteed by
+            # _validate_embeddings above, which raises ValueError on a length mismatch
+            # before this loop ever runs.
+            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings, strict=True)):
                 cursor = self.connection.execute(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
                     (document_id, ordinal, text, "{}"),
