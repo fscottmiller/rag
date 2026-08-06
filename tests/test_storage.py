@@ -176,3 +176,81 @@ def test_search_rejects_non_positive_or_non_integer_top_k(top_k):
     with pytest.raises(ValueError, match="between 1 and 100"):
         store.search([1.0], top_k)
     store.close()
+
+
+def test_search_score_is_cosine_similarity_ranging_from_negative_one_to_one():
+    # Pins the score formula (1.0 - distance, cosine metric) against its full
+    # [-1.0, 1.0] range, not just the identical-vector case (score == 1.0)
+    # covered elsewhere. A query vector of [1.0, 0.0] against an identical,
+    # an orthogonal, and an exactly opposed indexed vector must yield scores
+    # of 1.0, 0.0, and -1.0 respectively, and results must stay sorted by
+    # descending score. Replacing the formula with abs(1.0 - distance) keeps
+    # the identical-vector case correct but reports the opposed vector as
+    # score 1.0 too, inverting the ranking undetected -- this test fails
+    # under that mutation because it pins the negative score exactly and
+    # checks strict descending order.
+    store = SQLiteStore()
+    identical = store.create_document("Identical", "text", {}, ["chunk"], [[1.0, 0.0]])
+    orthogonal = store.create_document("Orthogonal", "text", {}, ["chunk"], [[0.0, 1.0]])
+    opposed = store.create_document("Opposed", "text", {}, ["chunk"], [[-1.0, 0.0]])
+
+    results = store.search([1.0, 0.0], 3)
+
+    scores_by_document = {item["document_id"]: item["score"] for item in results}
+    assert scores_by_document[identical["id"]] == pytest.approx(1.0)
+    assert scores_by_document[orthogonal["id"]] == pytest.approx(0.0)
+    assert scores_by_document[opposed["id"]] == pytest.approx(-1.0)
+
+    scores_in_order = [item["score"] for item in results]
+    assert scores_in_order == sorted(scores_in_order, reverse=True)
+    assert scores_in_order == [1.0, 0.0, -1.0]
+    store.close()
+
+
+def test_ensure_vector_table_rejects_mismatched_dimension_on_same_store():
+    # sqlite.py:101-102 is the last defense against mixing vector spaces in
+    # one index when there is no recorded embedding identity (the config
+    # nearly every other test in this suite runs under). Deleting the guard
+    # leaves all other tests passing, so it needs a direct trigger: create a
+    # 2-dim document, then attempt a 3-dim document on the same store.
+    store = SQLiteStore()
+    store.create_document("First", "text", {}, ["chunk"], [[1.0, 0.0]])
+    with pytest.raises(ValueError, match="must have the same dimension"):
+        store.create_document("Second", "text", {}, ["chunk"], [[1.0, 0.0, 0.0]])
+    store.close()
+
+
+def test_search_top_k_larger_than_corpus_returns_exactly_all_results():
+    store = SQLiteStore()
+    for index in range(5):
+        store.create_document(f"Document {index}", "text", {}, [f"chunk {index}"], [[1.0, 0.0]])
+
+    results = store.search([1.0, 0.0], 50)
+
+    assert len(results) == 5
+    assert {item["document_id"] for item in results} == {
+        item["id"] for item in store.list_documents()
+    }
+    store.close()
+
+
+def test_delete_document_cascades_to_chunks_table():
+    store = SQLiteStore()
+    created = store.create_document("Old", "old", {}, ["old", "also old"], [[1.0, 0.0], [0.9, 0.1]])
+    assert (
+        store.connection.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (created["id"],)
+        ).fetchone()[0]
+        == 2
+    )
+
+    store.delete_document(created["id"])
+
+    assert (
+        store.connection.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (created["id"],)
+        ).fetchone()[0]
+        == 0
+    )
+    assert store.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+    store.close()

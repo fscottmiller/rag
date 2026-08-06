@@ -2,7 +2,7 @@ import pytest
 
 from utralight_rag.config import Settings
 from utralight_rag.pipeline.embeddings import FastEmbedEmbedder, OpenAICompatibleEmbedder
-from utralight_rag.service import RAGService
+from utralight_rag.service import DocumentTooLargeError, RAGService
 from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
@@ -113,6 +113,57 @@ def test_service_enforces_document_limit(service):
     )
     with pytest.raises(ValueError, match="document content"):
         configured.ingest("Too large", "12345")
+
+
+def test_service_accepts_content_at_exact_document_byte_limit(service):
+    limit = 8
+    configured = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    content = "x" * limit
+    assert len(content.encode("utf-8")) == limit
+    document = configured.ingest("Exact", content)
+    assert document["chunk_count"] == 1
+
+
+def test_service_rejects_content_one_byte_over_document_limit(service):
+    limit = 8
+    configured = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    content = "x" * (limit + 1)
+    assert len(content.encode("utf-8")) == limit + 1
+    with pytest.raises(DocumentTooLargeError):
+        configured.ingest("Over", content)
+
+
+def test_service_measures_document_size_in_utf8_bytes_not_characters(service):
+    # "e" with an acute accent encodes to 2 UTF-8 bytes each: 2 characters, 4 bytes.
+    # A char-length check (len(content)) would wrongly accept this; only a byte-length
+    # check (len(content.encode("utf-8"))) correctly rejects it against a limit of 3.
+    limit = 3
+    configured = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    content = "éé"
+    assert len(content) <= limit
+    assert len(content.encode("utf-8")) > limit
+    with pytest.raises(DocumentTooLargeError):
+        configured.ingest("Multibyte", content)
+
+
+def test_service_update_accepts_and_rejects_at_exact_document_byte_limit(service):
+    limit = 8
+    configured = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    document = configured.ingest("Seed", "seed")
+
+    updated = configured.update(document["id"], "Exact", "x" * limit)
+    assert updated["chunk_count"] == 1
+
+    with pytest.raises(DocumentTooLargeError):
+        configured.update(document["id"], "Over", "x" * (limit + 1))
 
 
 def test_service_requires_reindex_for_legacy_nonempty_index(tmp_path):

@@ -66,6 +66,21 @@ async def test_mcp_tools_share_service_lifecycle(service):
 
 
 @pytest.mark.asyncio
+async def test_mcp_search_top_k_advertises_the_same_bounds_as_rest(service):
+    """REST's SearchPayload.top_k is `ge=1, le=100` (src/utralight_rag/api/models.py).
+    rag_search's inputSchema previously advertised no bounds at all, so a client
+    had no way to discover the limit short of trying an out-of-range value."""
+    server = create_mcp(service)
+    tools = await server.list_tools()
+    top_k_schema = next(tool for tool in tools if tool.name == "rag_search").inputSchema[
+        "properties"
+    ]["top_k"]
+    assert top_k_schema["minimum"] == 1
+    assert top_k_schema["maximum"] == 100
+    assert top_k_schema["default"] == 5
+
+
+@pytest.mark.asyncio
 async def test_mcp_document_tools_offload_storage_calls(service, monkeypatch):
     document = service.ingest("MCP guide", "Python context")
     calls = []

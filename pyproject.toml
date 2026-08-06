@@ -28,6 +28,14 @@ dev = [
   "pytest-asyncio>=0.23.0",
 ]
 
+[tool.uv]
+# cryptography is a transitive dependency (via pyjwt[crypto], pulled in by mcp[crypto]).
+# We don't import it directly, so it's not listed under [project.dependencies] -
+# but pin a floor here so a future `uv lock` can't silently resolve back to a
+# version vulnerable to PYSEC-2026-3552 (fixed in 50.0.0) if an intermediate
+# dependency ever relaxes its own constraint.
+constraint-dependencies = ["cryptography>=50.0.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -43,6 +51,7 @@ source = ["utralight_rag"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 95
+precision = 2
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -124,6 +124,82 @@ def test_rest_rejects_documents_over_configured_limit(service):
     assert response.status_code == 413
 
 
+def _post_document_at_boundary(client, path, content):
+    if path == "json":
+        return client.post("/documents", json={"title": "Boundary", "content": content})
+    if path == "multipart":
+        return client.post(
+            "/documents",
+            files={"file": ("notes.txt", content.encode("utf-8"), "text/plain")},
+        )
+    return client.post("/documents", data={"title": "Boundary", "content": content})
+
+
+@pytest.mark.parametrize("path", ["json", "multipart", "form"])
+def test_rest_accepts_document_content_at_exact_byte_limit(service, path):
+    limit = 8
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    content = "x" * limit
+    assert len(content.encode("utf-8")) == limit
+
+    response = _post_document_at_boundary(client, path, content)
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize("path", ["json", "multipart", "form"])
+def test_rest_rejects_document_content_one_byte_over_limit(service, path):
+    limit = 8
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    content = "x" * (limit + 1)
+    assert len(content.encode("utf-8")) == limit + 1
+
+    response = _post_document_at_boundary(client, path, content)
+    assert response.status_code == 413
+
+
+def test_rest_rejects_multibyte_content_by_utf8_byte_length_not_char_length(service):
+    # "e" with an acute accent encodes to 2 UTF-8 bytes each: 2 characters, 4 bytes.
+    # A char-length check (len(content)) would wrongly accept this against a limit of
+    # 3; only a correct byte-length check rejects it with 413.
+    limit = 3
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    content = "éé"
+    assert len(content) <= limit
+    assert len(content.encode("utf-8")) > limit
+
+    response = client.post("/documents", json={"title": "Multibyte", "content": content})
+    assert response.status_code == 413
+
+
+def test_rest_put_accepts_and_rejects_document_content_at_exact_byte_limit(service):
+    limit = 8
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    created = client.post("/documents", json={"title": "Seed", "content": "seed"})
+    document_id = created.json()["id"]
+
+    at_limit = client.put(
+        f"/documents/{document_id}", json={"title": "Exact", "content": "x" * limit}
+    )
+    assert at_limit.status_code == 200
+
+    over_limit = client.put(
+        f"/documents/{document_id}", json={"title": "Over", "content": "x" * (limit + 1)}
+    )
+    assert over_limit.status_code == 413
+
+
 def test_rest_rejects_large_request_before_parsing(service):
     limited = RAGService(
         SQLiteStore(),
