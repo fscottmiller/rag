@@ -200,6 +200,106 @@ def test_rest_put_accepts_and_rejects_document_content_at_exact_byte_limit(servi
     assert over_limit.status_code == 413
 
 
+def test_rest_put_accepts_multipart_file_upload(service):
+    client = TestClient(create_app(service))
+    created = client.post("/documents", json={"title": "Seed", "content": "seed content"})
+    document_id = created.json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}",
+        files={"file": ("updated.md", b"replaced|via|multipart")},
+        data={"metadata": '{"source": "file-update"}'},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "updated.md"
+    assert body["metadata"] == {"source": "file-update"}
+
+    fetched = client.get(f"/documents/{document_id}")
+    assert fetched.json()["content"] == "replaced|via|multipart"
+
+
+def test_rest_put_accepts_plain_form_fields(service):
+    client = TestClient(create_app(service))
+    created = client.post("/documents", json={"title": "Seed", "content": "seed content"})
+    document_id = created.json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}",
+        data={"title": "Form Update", "content": "replaced via form"},
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Form Update"
+
+    fetched = client.get(f"/documents/{document_id}")
+    assert fetched.json()["content"] == "replaced via form"
+
+
+def _put_document_at_boundary(client, document_id, path, content):
+    if path == "json":
+        return client.put(
+            f"/documents/{document_id}", json={"title": "Boundary", "content": content}
+        )
+    if path == "multipart":
+        return client.put(
+            f"/documents/{document_id}",
+            files={"file": ("notes.txt", content.encode("utf-8"), "text/plain")},
+        )
+    return client.put(f"/documents/{document_id}", data={"title": "Boundary", "content": content})
+
+
+@pytest.mark.parametrize("path", ["json", "multipart", "form"])
+def test_rest_put_accepts_document_content_at_exact_byte_limit_all_content_types(service, path):
+    limit = 8
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    created = client.post("/documents", json={"title": "Seed", "content": "seedling"})
+    document_id = created.json()["id"]
+    content = "x" * limit
+    assert len(content.encode("utf-8")) == limit
+
+    response = _put_document_at_boundary(client, document_id, path, content)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("path", ["json", "multipart", "form"])
+def test_rest_put_rejects_document_content_one_byte_over_limit_all_content_types(service, path):
+    limit = 8
+    limited = RAGService(
+        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+    )
+    client = TestClient(create_app(limited))
+    created = client.post("/documents", json={"title": "Seed", "content": "seedling"})
+    document_id = created.json()["id"]
+    content = "x" * (limit + 1)
+    assert len(content.encode("utf-8")) == limit + 1
+
+    response = _put_document_at_boundary(client, document_id, path, content)
+    assert response.status_code == 413
+
+
+def test_rest_put_rejects_per_document_index_options(service):
+    client = TestClient(create_app(service))
+    created = client.post("/documents", json={"title": "Seed", "content": "seed content"})
+    document_id = created.json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}",
+        files={"file": ("notes.txt", b"one two three four")},
+        data={"chunk_size": "2", "title": "Token notes"},
+    )
+    assert response.status_code == 422
+    assert (
+        client.put(
+            f"/documents/{document_id}",
+            json={"title": "Token notes", "content": "content", "embedding_choice": "other"},
+        ).status_code
+        == 422
+    )
+
+
 def test_rest_rejects_large_request_before_parsing(service):
     limited = RAGService(
         SQLiteStore(),
