@@ -267,3 +267,23 @@ def test_http_unknown_role_is_denied_for_read_and_write(trusted_service):
         assert write_result["_meta"]["error_type"] == "not_authorized"
 
     assert trusted_service.list_documents() == []
+
+
+@pytest.mark.parametrize("role", ["Reader", "READER", "Admin", "ADMIN"])
+def test_http_role_values_are_compared_case_sensitively(trusted_service, role):
+    """Only the exact configured role value grants access.
+
+    `RAG_PROXY_ADMIN_ROLE`/`RAG_PROXY_READER_ROLE` are compared verbatim, so a
+    proxy emitting a differently-cased value must not be silently upgraded to a
+    matching role.
+    """
+    app = create_combined_app(trusted_service)
+    with TestClient(app, base_url="http://testserver") as client:
+        session_id = _mcp_session(client)
+
+        result = _call_tool(
+            client, session_id, "list_documents", {}, role=role, user="alice@example.com"
+        )
+
+    assert result["isError"] is True
+    assert result["_meta"]["error_type"] == "not_authorized"
