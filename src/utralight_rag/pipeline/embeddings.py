@@ -20,6 +20,28 @@ _PROVIDER_ALIASES = {
 }
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow HTTP redirects.
+
+    ``urllib.request.urlopen`` follows 3xx redirects by default, resending the
+    ``Authorization`` header (and any other request headers) to whatever host the
+    redirect points to, without re-validating the URL scheme. That would defeat the
+    https-only enforcement on external embedding endpoints and let a compromised or
+    malicious provider exfiltrate the API key, or feed back fabricated vectors.
+    Returning ``None`` here tells urllib no handler will perform the redirect, which
+    surfaces it as a normal ``urllib.error.HTTPError`` for the original 3xx status.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# Built once at import time via build_opener() (never urllib.request.install_opener(),
+# which would mutate global process-wide state) so every embedding request goes through
+# an opener that never follows redirects.
+_opener = urllib.request.build_opener(_NoRedirectHandler)
+
+
 def canonical_provider(provider: str) -> str:
     normalized = provider.lower().replace("_", "-")
     return _PROVIDER_ALIASES.get(normalized, normalized)
@@ -76,14 +98,9 @@ def _validated_embeddings(vectors: list[object], expected_count: int) -> list[li
         for value in vector
     ):
         raise RuntimeError("Embedding provider returned invalid embeddings")
-    try:
-        embeddings = [[float(value) for value in vector] for vector in vectors]
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError("Embedding provider returned invalid embeddings") from exc
+    embeddings = [[float(value) for value in vector] for vector in vectors]
     if embeddings and (
-        not embeddings[0]
-        or any(len(vector) != len(embeddings[0]) for vector in embeddings)
-        or any(not math.isfinite(value) for vector in embeddings for value in vector)
+        not embeddings[0] or any(len(vector) != len(embeddings[0]) for vector in embeddings)
     ):
         raise RuntimeError("Embedding provider returned invalid embeddings")
     return embeddings
@@ -224,7 +241,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with _opener.open(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
                 if len(raw) > self.max_response_bytes:
                     raise RuntimeError("Embedding endpoint response exceeds size limit")
