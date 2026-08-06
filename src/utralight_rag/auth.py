@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -49,11 +52,15 @@ class Authorizer:
         user = self._header(headers, self.user_header)
         role = self._header(headers, self.role_header)
         if not user:
+            logger.warning(
+                "Authorization denied: no trusted proxy identity present, action=%s", action
+            )
             raise AuthenticationError("Trusted proxy identity is required")
         if role == self.admin_role:
             return Principal(user=user, role="admin")
         if role == self.reader_role and action == "read":
             return Principal(user=user, role="reader")
+        logger.warning("Authorization denied: user=%s role=%s action=%s", user, role, action)
         raise AuthorizationError("This role is not allowed to perform this action")
 
     @staticmethod

@@ -1,6 +1,7 @@
 """Pluggable embedding providers used by the ingestion and search pipeline."""
 
 import json
+import logging
 import math
 import urllib.error
 import urllib.request
@@ -13,12 +14,41 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
 
+logger = logging.getLogger(__name__)
+
 _PROVIDER_ALIASES = {
     "openai": "openai-compatible",
     "openai-compatible-api": "openai-compatible",
     "sentence-transformer": "sentence-transformers",
     "transformers": "sentence-transformers",
 }
+
+
+class EmbeddingProviderError(RuntimeError):
+    """An embedding provider failed to produce usable embeddings.
+
+    Subclasses ``RuntimeError`` (not a new, unrelated base) so call sites that
+    already do ``pytest.raises(RuntimeError, match=...)`` keep passing
+    unchanged, while giving the API/MCP adapters a specific type to catch
+    instead of bare ``RuntimeError`` -- which would risk mislabeling genuine
+    bugs elsewhere in the service as upstream failures. Callers should not
+    raise this class directly; raise one of the two subclasses below so the
+    adapters can map the failure to an accurate status code / error type.
+    """
+
+
+class EmbeddingProviderUnavailableError(EmbeddingProviderError):
+    """The provider could not be reached at all: connection refused, DNS
+    failure, or a timeout. The request never got a response, so retrying
+    later (once the provider is back) is likely to succeed. Maps to HTTP 503
+    in the REST adapter."""
+
+
+class EmbeddingProviderResponseError(EmbeddingProviderError):
+    """The provider was reached but returned something unusable: a non-2xx
+    HTTP status, malformed JSON, the wrong shape, non-finite values, or a
+    local model producing garbage output. The provider itself is misbehaving,
+    not the network path to it. Maps to HTTP 502 in the REST adapter."""
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -138,7 +168,14 @@ class SentenceTransformerEmbedder(BaseEmbedder):
                 self.model.encode(inputs, convert_to_numpy=True).tolist(), len(inputs)
             )
         except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
-            raise RuntimeError("SentenceTransformers returned invalid embeddings") from exc
+            logger.error(
+                "SentenceTransformers embedder (model=%s) returned invalid embeddings: %s",
+                self.model_name,
+                exc,
+            )
+            raise EmbeddingProviderResponseError(
+                "SentenceTransformers returned invalid embeddings"
+            ) from exc
 
 
 class FastEmbedEmbedder(BaseEmbedder):
@@ -166,11 +203,21 @@ class FastEmbedEmbedder(BaseEmbedder):
         try:
             vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
         except (AttributeError, TypeError, ValueError) as exc:
-            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
+            logger.error(
+                "FastEmbed embedder (model=%s) returned invalid embeddings: %s",
+                self.model_name,
+                exc,
+            )
+            raise EmbeddingProviderResponseError("FastEmbed returned invalid embeddings") from exc
         try:
             return _validated_embeddings(vectors, len(inputs))
         except RuntimeError as exc:
-            raise RuntimeError("FastEmbed returned invalid embeddings") from exc
+            logger.error(
+                "FastEmbed embedder (model=%s) returned invalid embeddings: %s",
+                self.model_name,
+                exc,
+            )
+            raise EmbeddingProviderResponseError("FastEmbed returned invalid embeddings") from exc
 
 
 class OpenAICompatibleEmbedder(BaseEmbedder):
@@ -251,35 +298,69 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             with _opener.open(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
                 if len(raw) > self.max_response_bytes:
-                    raise RuntimeError("Embedding endpoint response exceeds size limit")
+                    logger.error("Embedding endpoint %s response exceeds size limit", self.url)
+                    raise EmbeddingProviderResponseError(
+                        "Embedding endpoint response exceeds size limit"
+                    )
                 body = json.loads(raw)
         except urllib.error.HTTPError as exc:
+            # Logged here, in full, for operators. The exception message below also
+            # carries this detail (existing tests assert on it via
+            # pytest.raises(RuntimeError, match=...)), but callers in api/main.py and
+            # mcp_server/server.py must never forward str(exc) to a client: the
+            # provider's raw response body can contain upstream hostnames, quota
+            # details, or account identifiers.
             detail = exc.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"Embedding endpoint returned HTTP {exc.code}: {detail}") from exc
+            logger.error("Embedding endpoint %s returned HTTP %s: %s", self.url, exc.code, detail)
+            raise EmbeddingProviderResponseError(
+                f"Embedding endpoint returned HTTP {exc.code}: {detail}"
+            ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise RuntimeError(f"Embedding endpoint request failed: {exc}") from exc
+            logger.warning("Embedding endpoint %s request failed: %s", self.url, exc)
+            raise EmbeddingProviderUnavailableError(
+                f"Embedding endpoint request failed: {exc}"
+            ) from exc
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise RuntimeError("Embedding endpoint returned invalid JSON") from exc
+            logger.error("Embedding endpoint %s returned invalid JSON: %s", self.url, exc)
+            raise EmbeddingProviderResponseError(
+                "Embedding endpoint returned invalid JSON"
+            ) from exc
 
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list) or len(data) != len(inputs):
-            raise RuntimeError("Embedding endpoint returned an unexpected data count")
+            logger.error(
+                "Embedding endpoint %s returned an unexpected data count (expected %d)",
+                self.url,
+                len(inputs),
+            )
+            raise EmbeddingProviderResponseError(
+                "Embedding endpoint returned an unexpected data count"
+            )
         if not all(isinstance(item, dict) for item in data):
-            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+            logger.error("Embedding endpoint %s returned non-dict embedding items", self.url)
+            raise EmbeddingProviderResponseError("Embedding endpoint returned invalid embeddings")
         indexes = [item.get("index") for item in data]
         if any(isinstance(index, bool) or not isinstance(index, int) for index in indexes):
-            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+            logger.error("Embedding endpoint %s returned non-integer embedding indexes", self.url)
+            raise EmbeddingProviderResponseError("Embedding endpoint returned invalid embeddings")
         if set(indexes) != set(range(len(inputs))):
-            raise RuntimeError("Embedding endpoint returned invalid embeddings")
+            logger.error("Embedding endpoint %s returned mismatched embedding indexes", self.url)
+            raise EmbeddingProviderResponseError("Embedding endpoint returned invalid embeddings")
         data = sorted(data, key=lambda item: item["index"])
         try:
             vectors = [item["embedding"] for item in data]
         except KeyError as exc:
-            raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
+            logger.error("Embedding endpoint %s response item missing 'embedding' key", self.url)
+            raise EmbeddingProviderResponseError(
+                "Embedding endpoint returned invalid embeddings"
+            ) from exc
         try:
             return _validated_embeddings(vectors, len(inputs))
         except RuntimeError as exc:
-            raise RuntimeError("Embedding endpoint returned invalid embeddings") from exc
+            logger.error("Embedding endpoint %s returned invalid embeddings: %s", self.url, exc)
+            raise EmbeddingProviderResponseError(
+                "Embedding endpoint returned invalid embeddings"
+            ) from exc
 
 
 def create_embedder(
