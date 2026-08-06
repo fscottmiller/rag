@@ -5,11 +5,12 @@ import math
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from numbers import Real
 from threading import Lock
-from typing import Any, Sequence
+from typing import Any
 from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
 
 _PROVIDER_ALIASES = {
@@ -234,7 +235,13 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(
+        # S310 flags this as a possible arbitrary-scheme URL open, but self.url is
+        # already constrained to http/https (and to https with no embedded
+        # credentials for external providers) by the scheme/credential checks in
+        # __init__, and the request is dispatched through _opener, which never
+        # follows redirects - so a malicious 3xx response can't retarget it to an
+        # unvalidated scheme or host after the fact.
+        request = urllib.request.Request(  # noqa: S310
             self.url,
             data=json.dumps(payload).encode(),
             headers=headers,

@@ -61,4 +61,10 @@ asyncio_mode = "auto"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "B", "S", "ASYNC", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest's `assert` statements trip S101 (assert-detection is meant for
+# production code shipped without -O, not test suites where assert *is* the
+# mechanism); this leaves all other S-rules active for tests/.
+"tests/**" = ["S101"]
