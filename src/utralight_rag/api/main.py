@@ -126,6 +126,14 @@ def create_app(
         except AuthorizationError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    # Async-idiom rule: a handler is `async def` with an explicit `run_in_threadpool`
+    # call only when it needs to parse the request body itself (JSON/multipart/form),
+    # because that parsing requires `await`. Handlers that just take a Pydantic model
+    # or path/query params stay plain sync `def` and let Starlette dispatch them to
+    # its own threadpool implicitly. Sync-by-default is the safer footgun: a future
+    # edit to a sync handler that forgets to offload blocking work merely runs on
+    # Starlette's threadpool as before, whereas the same mistake on an `async def`
+    # handler would silently block the event loop.
     @app.post("/documents", status_code=201)
     async def create_document(request: Request) -> dict[str, Any]:
         require(request, "write")
@@ -155,13 +163,20 @@ def create_app(
         except DocumentNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Document not found") from exc
 
+    # PUT accepts the same content types as POST (JSON, multipart file upload, plain
+    # form fields) by reusing `_read_document_request`, which is why it is `async def`
+    # with explicit offload too — see the async-idiom rule above.
     @app.put("/documents/{document_id}")
-    def update_document(
-        request: Request, document_id: str, payload: DocumentPayload
-    ) -> dict[str, Any]:
+    async def update_document(request: Request, document_id: str) -> dict[str, Any]:
         require(request, "write")
         try:
-            return rag.update(document_id, **payload.model_dump())
+            payload = await _read_document_request(request)
+        except DocumentTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except (ValidationError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
+            return await run_in_threadpool(rag.update, document_id, **payload)
         except DocumentNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Document not found") from exc
         except DocumentTooLargeError as exc:

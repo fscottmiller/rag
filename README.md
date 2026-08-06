@@ -81,7 +81,8 @@ Available endpoints:
 - `POST /documents` — add JSON content or upload a text/Markdown file.
 - `GET /documents` — list indexed documents.
 - `GET /documents/{id}` — get a document and its chunks.
-- `PUT /documents/{id}` — replace a document.
+- `PUT /documents/{id}` — replace a document; accepts JSON, a multipart file upload, or plain
+  form fields, the same as `POST /documents`.
 - `DELETE /documents/{id}` — remove a document and its vectors.
 - `POST /search` — search chunks by embedding similarity.
 
@@ -100,12 +101,15 @@ The MCP endpoint is `/mcp` by default. Register it in Claude Code with:
 claude mcp add --transport http rag http://127.0.0.1:8001/mcp
 ```
 
-Because REST accepts multipart file uploads, large documents can be ingested directly from disk without putting their contents into an MCP tool call:
+Because REST accepts multipart file uploads, large documents can be ingested directly from disk without putting their contents into an MCP tool call. The same is true for updates — `PUT` takes the identical JSON/multipart/form request shapes as `POST`, so an edited file can be re-uploaded in place without reading it back into memory as a JSON string first:
 
 ```bash
 curl -F 'file=@/path/to/google-sre-book.md' http://127.0.0.1:8001/documents
 curl -F 'file=@/path/to/clean-code.txt' http://127.0.0.1:8001/documents
+curl -X PUT -F 'file=@/path/to/google-sre-book.md' http://127.0.0.1:8001/documents/{id}
 ```
+
+When a multipart or form update omits `title`, the title is (re)derived from the uploaded filename, the same as on create — pass `title` explicitly in the form fields if the update should keep the document's existing title.
 
 The indexed documents are then available through `rag_search`, `list_documents`, and `get_document`. Available tools are `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
 
