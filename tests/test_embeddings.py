@@ -467,7 +467,7 @@ def test_openai_compatible_embedder_rejects_response_item_missing_embedding_key(
 def test_openai_compatible_embedder_rejects_bare_json_non_finite_tokens(token):
     # json.loads accepts bare (unquoted) NaN/Infinity/-Infinity tokens by default and
     # turns them into real non-finite floats, unlike the "NaN"-as-string case above.
-    body = ('{"data": [{"index": 0, "embedding": [%s, 1.0]}]}' % token).encode()
+    body = ('{"data": [{"index": 0, "embedding": [' + token + ", 1.0]}]}").encode()
     with _local_json_server(body) as url:
         embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
         with pytest.raises(RuntimeError, match="invalid embeddings"):

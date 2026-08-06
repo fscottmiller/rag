@@ -152,8 +152,8 @@ def create_app(
         require(request, "read")
         try:
             return rag.get_document(document_id)
-        except DocumentNotFoundError:
-            raise HTTPException(status_code=404, detail="Document not found")
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Document not found") from exc
 
     @app.put("/documents/{document_id}")
     def update_document(
@@ -162,8 +162,8 @@ def create_app(
         require(request, "write")
         try:
             return rag.update(document_id, **payload.model_dump())
-        except DocumentNotFoundError:
-            raise HTTPException(status_code=404, detail="Document not found")
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Document not found") from exc
         except DocumentTooLargeError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ValueError as exc:
@@ -174,8 +174,8 @@ def create_app(
         require(request, "write")
         try:
             rag.delete_document(document_id)
-        except DocumentNotFoundError:
-            raise HTTPException(status_code=404, detail="Document not found")
+        except DocumentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Document not found") from exc
 
     @app.post("/search")
     def search(request: Request, payload: SearchPayload) -> list[dict[str, Any]]:
