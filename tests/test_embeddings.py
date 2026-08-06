@@ -3,11 +3,13 @@ import sys
 import threading
 import time
 import urllib.error
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import pytest
 
+from utralight_rag.pipeline import embeddings as embeddings_module
 from utralight_rag.pipeline.embeddings import (
     BaseEmbedder,
     FastEmbedEmbedder,
@@ -324,11 +326,149 @@ def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
         def close(self):
             pass
 
-    def urlopen(*_args, **_kwargs):
+    calls = []
+
+    def fake_open(request, timeout=None):
+        calls.append((request, timeout))
         raise urllib.error.HTTPError("http://embedding.test", 503, "Unavailable", {}, ErrorBody())
 
-    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    # The embedder issues requests through the module's no-redirect opener (see F1
+    # fix), not urllib.request.urlopen directly, so that is what must be patched for
+    # this test to actually exercise the code path it claims to.
+    monkeypatch.setattr(embeddings_module._opener, "open", fake_open)
     embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
     embedder.max_response_bytes = 3
     with pytest.raises(RuntimeError, match="HTTP 503: error"):
         embedder.embed(["one"])
+    assert len(calls) == 1
+
+
+@contextmanager
+def _local_json_server(body: bytes, status: int = 200):
+    """Serve a fixed raw response body to any POST, on 127.0.0.1 with an OS-assigned port."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1/embeddings"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_openai_compatible_embedder_does_not_follow_redirects_with_credentials():
+    """Regression test for F1: a redirect must never carry the Authorization header
+    to another host, and a fabricated response from the redirect target must never
+    be accepted as a real embedding."""
+    secondary_requests = []
+
+    class SecondaryHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            secondary_requests.append((self.path, self.headers.get("Authorization")))
+            body = json.dumps({"data": [{"index": 0, "embedding": [9.0, 9.0]}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    secondary = ThreadingHTTPServer(("127.0.0.1", 0), SecondaryHandler)
+    secondary_thread = threading.Thread(target=secondary.serve_forever, daemon=True)
+    secondary_thread.start()
+    secondary_url = f"http://127.0.0.1:{secondary.server_port}/steal"
+
+    primary_requests = []
+
+    class PrimaryHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            primary_requests.append((self.path, self.headers.get("Authorization")))
+            self.send_response(302)
+            self.send_header("Location", secondary_url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    primary = ThreadingHTTPServer(("127.0.0.1", 0), PrimaryHandler)
+    primary_thread = threading.Thread(target=primary.serve_forever, daemon=True)
+    primary_thread.start()
+
+    try:
+        embedder = OpenAICompatibleEmbedder(
+            "model",
+            f"http://127.0.0.1:{primary.server_port}/v1/embeddings",
+            "SUPER-SECRET-KEY",
+            provider="ollama",
+        )
+        with pytest.raises(RuntimeError, match="HTTP 302"):
+            embedder.embed(["one"])
+    finally:
+        primary.shutdown()
+        primary_thread.join()
+        primary.server_close()
+        secondary.shutdown()
+        secondary_thread.join()
+        secondary.server_close()
+
+    assert primary_requests == [("/v1/embeddings", "Bearer SUPER-SECRET-KEY")]
+    # The redirect target must never be contacted at all, let alone receive the key.
+    assert secondary_requests == []
+
+
+def test_openai_compatible_embedder_wraps_timeout_and_connection_errors(monkeypatch):
+    def raise_timeout(*_args, **_kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(embeddings_module._opener, "open", raise_timeout)
+    embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
+    with pytest.raises(RuntimeError, match=r"Embedding endpoint request failed: timed out"):
+        embedder.embed(["one"])
+
+    def raise_url_error(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(embeddings_module._opener, "open", raise_url_error)
+    with pytest.raises(RuntimeError, match=r"Embedding endpoint request failed"):
+        embedder.embed(["one"])
+
+
+def test_openai_compatible_embedder_rejects_response_item_missing_embedding_key():
+    body = json.dumps({"data": [{"index": 0}]}).encode()
+    with _local_json_server(body) as url:
+        embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
+        with pytest.raises(RuntimeError, match="invalid embeddings"):
+            embedder.embed(["one"])
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_openai_compatible_embedder_rejects_bare_json_non_finite_tokens(token):
+    # json.loads accepts bare (unquoted) NaN/Infinity/-Infinity tokens by default and
+    # turns them into real non-finite floats, unlike the "NaN"-as-string case above.
+    body = ('{"data": [{"index": 0, "embedding": [%s, 1.0]}]}' % token).encode()
+    with _local_json_server(body) as url:
+        embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
+        with pytest.raises(RuntimeError, match="invalid embeddings"):
+            embedder.embed(["one"])
