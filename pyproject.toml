@@ -66,9 +66,5 @@ select = ["E", "F", "I", "B", "S", "ASYNC", "UP"]
 [tool.ruff.lint.per-file-ignores]
 # Pytest's `assert` statements trip S101 (assert-detection is meant for
 # production code shipped without -O, not test suites where assert *is* the
-# mechanism); this leaves all other S-rules active for tests/. UP031 is also
-# excluded for one pre-existing percent-formatted string literal in
-# tests/test_embeddings.py - this PR is scoped to linting config only and
-# does not modify test source, so a mechanical rewrite of that line is left
-# for the next PR that touches test content, rather than bundled here.
-"tests/**" = ["S101", "UP031"]
+# mechanism); this leaves all other S-rules active for tests/.
+"tests/**" = ["S101"]
