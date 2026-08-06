@@ -74,6 +74,8 @@ curl -X POST http://127.0.0.1:8001/search \
   -d '{"query":"useful context","top_k":5}'
 ```
 
+Each result's `score` is `1.0 - cosine_distance`, so it ranges from **-1.0 to 1.0**, not 0 to 1: 1.0 for an identical vector, 0.0 for orthogonal vectors, and -1.0 for opposed vectors.
+
 Available endpoints:
 
 - `POST /documents` — add JSON content or upload a text/Markdown file.
@@ -169,6 +171,6 @@ uv run coverage run -m pytest
 uv run coverage report
 ```
 
-The suite fails if total branch-aware coverage drops below 95%. GitHub Actions runs it automatically on every push and pull request against Python 3.11, 3.12, and 3.13.
+The suite fails if total branch-aware coverage drops below 95%, measured to two decimal places (`fail_under = 95`, `precision = 2` in `pyproject.toml`). GitHub Actions runs it automatically on every push and pull request against Python 3.11, 3.12, and 3.13.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions and trade-offs.
