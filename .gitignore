@@ -62,3 +62,6 @@ service-account*.json
 
 # OpenHands/browser recordings and temporary workspace artifacts
 .agent_tmp/
+
+# Ephemeral git worktrees created for isolated agent runs
+.claude/worktrees/
