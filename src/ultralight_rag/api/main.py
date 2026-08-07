@@ -44,11 +44,14 @@ def _same_origin(origin: str, request: Request) -> bool:
         return False
     if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         return False
-    request_port = (
-        request.url.port
-        if request.url.port is not None
-        else {"http": 80, "https": 443}.get(request.url.scheme)
-    )
+    try:
+        request_port = (
+            request.url.port
+            if request.url.port is not None
+            else {"http": 80, "https": 443}.get(request.url.scheme)
+        )
+    except ValueError:
+        return False
     return (parsed.scheme, parsed.hostname, origin_port) == (
         request.url.scheme,
         request.url.hostname,
