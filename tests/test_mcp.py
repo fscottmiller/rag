@@ -282,7 +282,7 @@ def test_provider_failure_mapping():
 
     assert result.isError is True
     assert result.structuredContent == denied_content
-    assert getattr(result, "_meta", None) == {"error_type": "embedding_provider_unavailable"}
+    assert getattr(result, "meta", getattr(result, "_meta", None)) == {"error_type": "embedding_provider_unavailable"}
     assert result.content[0].text == "The embedding provider is currently unavailable."
 
     # Test generic error
@@ -291,5 +291,5 @@ def test_provider_failure_mapping():
 
     assert result2.isError is True
     assert result2.structuredContent == denied_content
-    assert getattr(result2, "_meta", None) == {"error_type": "embedding_provider_error"}
+    assert getattr(result2, "meta", getattr(result2, "_meta", None)) == {"error_type": "embedding_provider_error"}
     assert result2.content[0].text == "The embedding provider returned an invalid response."
