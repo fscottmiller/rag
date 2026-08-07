@@ -26,6 +26,7 @@ dev = [
   "httpx2>=2.9.1",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  "pytest-randomly>=3.15.0",
 ]
 
 [tool.uv]
@@ -56,6 +57,53 @@ precision = 2
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+  "error",
+  # Pre-existing resource leak (not fixed by this PR -- see PR body for details,
+  # out of scope: fix belongs in src/): `_read_document_request` in api/main.py
+  # awaits `request.form()` for multipart uploads but never calls
+  # `await form.close()`, so the backing SpooledTemporaryFile for uploaded
+  # files is only closed when garbage collected. GC then raises a
+  # ResourceWarning from inside `__del__`, which pytest reports as an
+  # "unraisable exception" warning. Ignored narrowly by exact origin so any
+  # *other* unraisable-exception warning still fails the build.
+  "ignore:Exception ignored in. <function SpooledTemporaryFile\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
+  # Third-party: the `mcp` SDK's StreamableHTTP session manager keeps an
+  # anyio MemoryObjectReceiveStream per session. Sessions opened in tests via
+  # starlette's TestClient (rather than a real client that sends a session
+  # -terminating DELETE) aren't always torn down before the TestClient's
+  # lifespan shuts down, so the stream is closed by GC instead of explicitly
+  # inside the SDK. Ignored narrowly by exact origin, same rationale as above.
+  "ignore:Exception ignored in. <function MemoryObjectReceiveStream\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.mutmut]
+# Scoped to the highest-risk modules identified by the security review (auth,
+# storage, and the embedding pipeline that handles credentials in URLs) --
+# full-repo mutation testing is too slow to run routinely; see the CI
+# hardening PR body for measured per-module timings. Runs on a schedule /
+# manual trigger only (.github/workflows/mutation.yml), never on push/PR.
+source_paths = ["src"]
+only_mutate = [
+  "src/utralight_rag/auth.py",
+  "src/utralight_rag/storage/sqlite.py",
+  "src/utralight_rag/pipeline/embeddings.py",
+]
+# Restricting to the tests that actually exercise these modules keeps each
+# mutant's test run fast, and (found empirically) avoids a mutmut quirk: it
+# calls pytest.main() multiple times in one long-lived process, so a test
+# like test_mcp.py::test_combined_import_does_not_create_an_unused_rest_app
+# that asserts on fresh-process module state spuriously fails there even
+# though it passes reliably (verified with 8+ full-suite runs, including
+# randomized order) under normal single-invocation pytest/CI.
+pytest_add_cli_args_test_selection = [
+  "tests/test_auth.py",
+  "tests/test_mcp_auth.py",
+  "tests/test_storage.py",
+  "tests/test_storage_concurrency.py",
+  "tests/test_embeddings.py",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,59 @@
+name: Mutation testing
+
+# Mutation testing is far too slow to run on every push (measured ~150s just
+# for the three modules scoped below, dominated by pipeline/embeddings.py's
+# real embedding-model tests) -- see [tool.mutmut] in pyproject.toml and the
+# CI hardening PR body for the full measured breakdown per module. This runs
+# weekly and on demand instead of blocking the push/PR critical path in
+# tests.yml.
+#
+# Report-only: `mutmut run` exits 0 regardless of how many mutants survive,
+# and this job does not turn that into a pass/fail gate. The review that
+# motivated this workflow found real, still-open gaps (see PR body) that are
+# out of scope to fix here (this PR may not touch src/), so a hard "zero
+# survivors" gate would fail on day one for reasons unrelated to this PR's
+# changes. The point of this job is visibility into the survivor list so
+# follow-up PRs can drive it down, not a merge gate.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+jobs:
+  mutation-testing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # Scoped via [tool.mutmut] in pyproject.toml to auth.py, storage/sqlite.py,
+      # and pipeline/embeddings.py -- the modules the security review flagged as
+      # highest-risk (the authorization layer whose deletion 4/9 hand-written
+      # mutations survived, the single-connection SQLite store, and the
+      # credential-handling embedding pipeline).
+      - name: Run mutation testing on high-risk modules
+        run: uv run --with mutmut mutmut run || true
+
+      - name: Print results summary
+        run: uv run --with mutmut mutmut results
+
+      - name: Upload mutation testing results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-cache
+          path: .mutmut-cache
+          retention-days: 30
