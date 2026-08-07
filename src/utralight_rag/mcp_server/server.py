@@ -18,6 +18,26 @@ from ..storage.sqlite import DocumentNotFoundError
 
 _ALLOWED_TRANSPORTS = {"stdio", "streamable-http"}
 
+# `CallToolResult` cannot appear inside a `Union`/`|` return annotation -- the SDK
+# raises `InvalidSignature` at tool-registration time if it does (see
+# `mcp.server.fastmcp.utilities.func_metadata.func_metadata`, which explicitly
+# rejects a `T | CallToolResult` return annotation). Instead, the SDK supports
+# `Annotated[CallToolResult, RealReturnType]` for tools that sometimes bypass
+# normal result conversion by returning a `CallToolResult` directly: the
+# advertised `outputSchema` is still derived from `RealReturnType` -- byte-for-byte
+# what it would be if the annotation had just been `RealReturnType` -- because
+# `func_metadata` special-cases `Annotated[CallToolResult, ...]` and rebuilds the
+# schema from the second element (see its `issubclass(return_type_expr,
+# CallToolResult)` branch). At runtime, `FuncMetadata.convert_result` checks
+# `isinstance(result, CallToolResult)` unconditionally -- before consulting the
+# annotation at all -- so returning a `CallToolResult` already worked prior to
+# this change; only the *declared* type was a lie. This alias makes it honest:
+# mypy resolves `Annotated[X, ...]` to `X` (PEP 593), so these tools are now
+# correctly typed as "returns CallToolResult" for the denial/failure paths.
+SearchResult = Annotated[CallToolResult, list[dict[str, Any]]]
+DocumentResult = Annotated[CallToolResult, dict[str, Any]]
+DeleteResult = Annotated[CallToolResult, dict[str, str]]
+
 
 def get_transport() -> str:
     transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
@@ -109,7 +129,7 @@ def create_mcp(
         filter_metadata: dict[str, Any] | None = None,
         *,
         ctx: Context,
-    ) -> list[dict[str, Any]]:
+    ) -> SearchResult:
         """Search indexed chunks by semantic similarity."""
         if denial := authorize(ctx, "read", denied_content={"result": []}):
             return denial
@@ -119,14 +139,14 @@ def create_mcp(
             return provider_failure(exc, denied_content={"result": []})
 
     @server.tool()
-    async def list_documents(*, ctx: Context) -> list[dict[str, Any]]:
+    async def list_documents(*, ctx: Context) -> SearchResult:
         """List documents currently held in the index."""
         if denial := authorize(ctx, "read", denied_content={"result": []}):
             return denial
         return await anyio.to_thread.run_sync(rag.list_documents)
 
     @server.tool()
-    async def get_document(document_id: str, *, ctx: Context) -> dict[str, Any]:
+    async def get_document(document_id: str, *, ctx: Context) -> DocumentResult:
         """Retrieve one document, metadata, and its chunks."""
         if denial := authorize(ctx, "read", denied_content={}):
             return denial
@@ -142,7 +162,7 @@ def create_mcp(
         metadata: dict[str, Any] | None = None,
         *,
         ctx: Context,
-    ) -> dict[str, Any]:
+    ) -> DocumentResult:
         """Ingest a document directly into the index."""
         if denial := authorize(ctx, "write", denied_content={}):
             return denial
@@ -152,7 +172,7 @@ def create_mcp(
             return provider_failure(exc, denied_content={})
 
     @server.tool()
-    async def delete_document(document_id: str, *, ctx: Context) -> dict[str, str]:
+    async def delete_document(document_id: str, *, ctx: Context) -> DeleteResult:
         """Delete a document and all of its indexed chunks."""
         if denial := authorize(ctx, "write", denied_content={}):
             return denial
