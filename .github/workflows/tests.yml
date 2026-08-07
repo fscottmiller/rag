@@ -57,6 +57,40 @@ jobs:
       - name: Run lint and format checks
         run: uvx ruff check . && uvx ruff format --check .
 
+  typecheck-mcp-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # Scoped to src/utralight_rag/mcp_server/ only (see [tool.mypy] in
+      # pyproject.toml) -- not repo-wide. That module's tools declare honest
+      # `CallToolResult`-aware return types (SearchResult/DocumentResult/
+      # DeleteResult in server.py) specifically so a static checker can catch
+      # a future edit that quietly reverts one of those aliases back to a
+      # dishonest bare type, which the runtime test suite cannot detect (the
+      # SDK dispatches on `isinstance`, not the declared annotation, so both
+      # the honest and dishonest forms pass every test and produce the exact
+      # same advertised schema). pipeline/ and storage/ have their own
+      # pre-existing, unrelated mypy errors and are intentionally not gated
+      # here; a single Python version is enough since this is a pure static
+      # check with no version-dependent runtime behavior to cover.
+      - name: Type-check mcp_server with mypy
+        run: uv run mypy
+
   lockfile:
     runs-on: ubuntu-latest
     steps:

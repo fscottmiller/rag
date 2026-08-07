@@ -81,6 +81,41 @@ async def test_mcp_search_top_k_advertises_the_same_bounds_as_rest(service):
 
 
 @pytest.mark.asyncio
+async def test_mcp_output_schemas_are_unaffected_by_the_call_tool_result_annotation(service):
+    """rag_search/list_documents/get_document/upload_document/delete_document are
+    all annotated `Annotated[CallToolResult, RealReturnType]` (see server.py) so
+    the tools can return a `CallToolResult` directly on the authorization-denial
+    and provider-failure paths while the *advertised* structured-output schema
+    is still derived from `RealReturnType`, byte-for-byte identical to what it
+    would be for a plain `-> RealReturnType` annotation. This locks that contract
+    in: the schemas below are exactly what each tool advertised before N3's
+    return-type annotations were widened, captured with `list_tools()` against
+    both the old and new code and diffed to confirm zero drift."""
+    server = create_mcp(service)
+    schemas = {tool.name: tool.outputSchema for tool in await server.list_tools()}
+
+    for name in ("rag_search", "list_documents"):
+        schema = schemas[name]
+        assert schema["type"] == "object"
+        assert schema["required"] == ["result"]
+        assert schema["properties"]["result"]["type"] == "array"
+        assert schema["properties"]["result"]["items"] == {
+            "type": "object",
+            "additionalProperties": True,
+        }
+
+    for name in ("get_document", "upload_document"):
+        schema = schemas[name]
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is True
+        assert "required" not in schema
+
+    delete_schema = schemas["delete_document"]
+    assert delete_schema["type"] == "object"
+    assert delete_schema["additionalProperties"] == {"type": "string"}
+
+
+@pytest.mark.asyncio
 async def test_mcp_document_tools_offload_storage_calls(service, monkeypatch):
     document = service.ingest("MCP guide", "Python context")
     calls = []
