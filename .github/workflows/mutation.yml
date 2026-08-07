@@ -45,10 +45,10 @@ jobs:
       # mutations survived, the single-connection SQLite store, and the
       # credential-handling embedding pipeline).
       - name: Run mutation testing on high-risk modules
-        run: uv run --with mutmut mutmut run || true
+        run: uv run --with "mutmut==3.7.0" mutmut run || true
 
       - name: Print results summary
-        run: uv run --with mutmut mutmut results
+        run: uv run --with "mutmut==3.7.0" mutmut results
 
       - name: Upload mutation testing results
         if: always()

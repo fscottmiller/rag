@@ -70,11 +70,14 @@ filterwarnings = [
   # *other* unraisable-exception warning still fails the build.
   "ignore:Exception ignored in. <function SpooledTemporaryFile\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
   # Third-party: the `mcp` SDK's StreamableHTTP session manager keeps an
-  # anyio MemoryObjectReceiveStream per session. Sessions opened in tests via
-  # starlette's TestClient (rather than a real client that sends a session
-  # -terminating DELETE) aren't always torn down before the TestClient's
-  # lifespan shuts down, so the stream is closed by GC instead of explicitly
-  # inside the SDK. Ignored narrowly by exact origin, same rationale as above.
+  # anyio MemoryObjectReceiveStream per session, and one is closed by GC
+  # rather than explicitly. Root cause is NOT fully isolated: it is tied to
+  # session *creation*, not teardown -- the leak persists even when the test
+  # sends an explicit session-terminating `DELETE /mcp` (200 OK), and occurs
+  # after a bare `initialize` with no further calls, while a test that opens
+  # no MCP session at all does not leak. Confirmed third-party in origin: the
+  # traceback frames are entirely inside the `mcp` package, not this repo.
+  # Ignored narrowly by exact origin, same rationale as above.
   "ignore:Exception ignored in. <function MemoryObjectReceiveStream\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
   # Pre-existing resource leak (not fixed by this PR, tracked as follow-up
   # work): tests across test_mcp.py, test_service.py, and test_mcp_auth.py
@@ -110,12 +113,19 @@ only_mutate = [
 # that asserts on fresh-process module state spuriously fails there even
 # though it passes reliably (verified with 8+ full-suite runs, including
 # randomized order) under normal single-invocation pytest/CI.
+# test_service.py is included because it holds the only coverage of
+# pipeline/embeddings.py's credential guard (_has_query_credentials). Omitting
+# it made that guard's mutants look like survivors when they are in fact
+# killed, i.e. the report claimed a credential-handling coverage gap that did
+# not exist. A mutation report that cries wolf stops being read, so any test
+# file that exercises an only_mutate module belongs in this list.
 pytest_add_cli_args_test_selection = [
   "tests/test_auth.py",
   "tests/test_mcp_auth.py",
   "tests/test_storage.py",
   "tests/test_storage_concurrency.py",
   "tests/test_embeddings.py",
+  "tests/test_service.py",
 ]
 
 [tool.ruff]
