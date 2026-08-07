@@ -40,6 +40,16 @@ def _close_sqlite_stores_opened_during_test(monkeypatch):
     instance the test creates, then closes all of them at teardown.
     `SQLiteStore.close()` is idempotent, so this stays safe even for stores a
     test already closed itself.
+
+    Limitation -- do not create a `SQLiteStore` in a module- or session-scoped
+    fixture. This fixture is function-scoped, so pytest instantiates any
+    higher-scoped fixture *before* the patch is installed; such a store is
+    built by the original `__init__`, is never tracked, and leaks. It does not
+    fail quietly, but it fails badly: the `ResourceWarning` surfaces as an
+    unraisable exception at session teardown, attributed to no test at all,
+    which is far harder to diagnose than the per-test failures this fixture
+    was written to eliminate. Use a function-scoped fixture, or close the
+    store explicitly with `with SQLiteStore(...) as store:`.
     """
     opened: list[SQLiteStore] = []
     original_init = SQLiteStore.__init__
