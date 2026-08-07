@@ -60,15 +60,6 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
   "error",
-  # Pre-existing resource leak (not fixed by this PR -- see PR body for details,
-  # out of scope: fix belongs in src/): `_read_document_request` in api/main.py
-  # awaits `request.form()` for multipart uploads but never calls
-  # `await form.close()`, so the backing SpooledTemporaryFile for uploaded
-  # files is only closed when garbage collected. GC then raises a
-  # ResourceWarning from inside `__del__`, which pytest reports as an
-  # "unraisable exception" warning. Ignored narrowly by exact origin so any
-  # *other* unraisable-exception warning still fails the build.
-  "ignore:Exception ignored in. <function SpooledTemporaryFile\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
   # Third-party: the `mcp` SDK's StreamableHTTP session manager keeps an
   # anyio MemoryObjectReceiveStream per session, and one is closed by GC
   # rather than explicitly. Root cause is NOT fully isolated: it is tied to
