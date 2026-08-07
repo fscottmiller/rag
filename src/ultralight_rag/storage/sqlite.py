@@ -193,10 +193,12 @@ class SQLiteStore:
 
     @_synchronized
     def list_documents(self) -> list[dict[str, Any]]:
+        # ⚡ Bolt: Replaced a `LEFT JOIN ... GROUP BY d.id` with a correlated scalar subquery.
+        # This optimizes performance significantly (removes grouping overhead, uses index lookups)
+        # by leveraging the existing UNIQUE(document_id, ordinal) index on the chunks table.
         rows = self.connection.execute(
-            """SELECT d.*, COUNT(c.id) AS chunk_count FROM documents d
-               LEFT JOIN chunks c ON c.document_id = d.id
-               GROUP BY d.id ORDER BY d.created_at"""
+            """SELECT d.*, (SELECT COUNT(id) FROM chunks WHERE document_id = d.id) AS chunk_count
+               FROM documents d ORDER BY d.created_at"""
         ).fetchall()
         return [self._document_summary(row) for row in rows]
 
