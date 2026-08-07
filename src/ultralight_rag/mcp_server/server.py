@@ -79,7 +79,7 @@ def create_mcp(
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
     server = FastMCP(
-        "utralight-rag",
+        "ultralight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
         # mypy does not narrow `str | None or str` down to plain `str` here (it

@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from utralight_rag.pipeline import embeddings as embeddings_module
-from utralight_rag.pipeline.embeddings import (
+from ultralight_rag.pipeline import embeddings as embeddings_module
+from ultralight_rag.pipeline.embeddings import (
     BaseEmbedder,
     EmbeddingProviderResponseError,
     FastEmbedEmbedder,

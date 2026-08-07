@@ -76,7 +76,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      # Scoped to src/utralight_rag/mcp_server/ only (see [tool.mypy] in
+      # Scoped to src/ultralight_rag/mcp_server/ only (see [tool.mypy] in
       # pyproject.toml) -- not repo-wide. That module's tools declare honest
       # `CallToolResult`-aware return types (SearchResult/DocumentResult/
       # DeleteResult in server.py) specifically so a static checker can catch
@@ -174,4 +174,4 @@ jobs:
         run: |
           uv venv /tmp/wheel-check-venv
           uv pip install --python /tmp/wheel-check-venv/bin/python dist/*.whl
-          /tmp/wheel-check-venv/bin/python -c "import utralight_rag; print(utralight_rag.__file__)"
+          /tmp/wheel-check-venv/bin/python -c "import ultralight_rag; print(ultralight_rag.__file__)"

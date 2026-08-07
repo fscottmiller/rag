@@ -2,7 +2,7 @@
 
 Before this file existed, `tests/test_mcp.py` never constructed a service in
 `trusted-proxy` auth mode, so the `authorize(...)` calls in
-`src/utralight_rag/mcp_server/server.py` were completely unexercised: deleting
+`src/ultralight_rag/mcp_server/server.py` were completely unexercised: deleting
 every `authorize(...)` call from every tool still left the full suite green.
 These tests lock in the denial behavior (and non-mutation on denied writes)
 for both ways a tool can be invoked, and also cover the distinguishable
@@ -19,9 +19,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from utralight_rag.combined import create_combined_app
-from utralight_rag.mcp_server.server import create_mcp
-from utralight_rag.service import RAGService
+from ultralight_rag.combined import create_combined_app
+from ultralight_rag.mcp_server.server import create_mcp
+from ultralight_rag.service import RAGService
 
 
 @pytest.fixture

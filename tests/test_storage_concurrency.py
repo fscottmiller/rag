@@ -17,7 +17,7 @@ import queue
 import sqlite3
 import threading
 
-from utralight_rag.storage.sqlite import SQLiteStore
+from ultralight_rag.storage.sqlite import SQLiteStore
 
 THREAD_COUNT = 12
 

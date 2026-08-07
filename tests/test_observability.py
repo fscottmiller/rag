@@ -29,16 +29,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from fastapi.testclient import TestClient
 
-from utralight_rag.api.main import create_app
-from utralight_rag.mcp_server.server import create_mcp
-from utralight_rag.pipeline.embeddings import (
+from ultralight_rag.api.main import create_app
+from ultralight_rag.mcp_server.server import create_mcp
+from ultralight_rag.pipeline.embeddings import (
     BaseEmbedder,
     EmbeddingProviderError,
     EmbeddingProviderResponseError,
     EmbeddingProviderUnavailableError,
     OpenAICompatibleEmbedder,
 )
-from utralight_rag.service import RAGService
+from ultralight_rag.service import RAGService
 
 
 class FailingEmbedder(BaseEmbedder):
@@ -133,7 +133,7 @@ def test_rest_does_not_leak_provider_detail_but_logs_it(service, caplog):
         failing = RAGService(service.store, embedder, service.chunker, service.settings)
         client = TestClient(create_app(failing))
 
-        with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+        with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
             response = client.post("/documents", json={"title": "Doc", "content": "python"})
 
     assert response.status_code == 502
@@ -185,7 +185,7 @@ def test_provider_detail_cannot_forge_a_log_line(service, caplog):
     authorization grant. %r escapes it to a literal backslash-n.
     """
     forged = (
-        b"boom\n2099-01-01 00:00:00 WARNING utralight_rag.auth: "
+        b"boom\n2099-01-01 00:00:00 WARNING ultralight_rag.auth: "
         b"FORGED user=admin role=admin action=write"
     )
     assert b"\n" in forged, "the probe must carry a real newline, not an escaped one"
@@ -194,7 +194,7 @@ def test_provider_detail_cannot_forge_a_log_line(service, caplog):
         embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
         failing = RAGService(service.store, embedder, service.chunker, service.settings)
         client = TestClient(create_app(failing))
-        with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+        with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
             client.post("/documents", json={"title": "D", "content": "python"})
 
     assert caplog.records, "the provider failure must be logged at all"
@@ -237,7 +237,7 @@ def test_openai_compatible_embedder_classifies_http_error_as_response_error(capl
     body = json.dumps({"error": leaked_detail}).encode()
     with _local_error_server(500, body) as url:
         embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
-        with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+        with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
             with pytest.raises(EmbeddingProviderResponseError) as excinfo:
                 embedder.embed(["one"])
     assert not isinstance(excinfo.value, EmbeddingProviderUnavailableError)
@@ -339,7 +339,7 @@ async def test_mcp_upload_document_reports_invalid_provider_response_without_mut
 
 def test_service_logs_document_lifecycle_by_id_never_content(service, caplog):
     leaked_content = "extremely-secret-document-body-9f31"
-    with caplog.at_level(logging.DEBUG, logger="utralight_rag"):
+    with caplog.at_level(logging.DEBUG, logger="ultralight_rag"):
         created = service.ingest("My Title", leaked_content, metadata={"source": "test"})
         document_id = created["id"]
         service.update(document_id, "My Title 2", "replacement-body-content")
@@ -356,7 +356,7 @@ def test_service_logs_document_lifecycle_by_id_never_content(service, caplog):
 
 def test_service_logs_embedding_provider_failure_with_document_context(service, caplog):
     failing = _failing_service(service, EmbeddingProviderResponseError("boom"))
-    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
         with pytest.raises(EmbeddingProviderResponseError):
             failing.ingest("Failing Doc", "python")
     log_text = "\n".join(record.getMessage() for record in caplog.records)
@@ -366,11 +366,11 @@ def test_service_logs_embedding_provider_failure_with_document_context(service, 
 def test_service_logs_authorization_denials_with_principal_and_action(service, caplog):
     from dataclasses import replace
 
-    from utralight_rag.auth import AuthorizationError, Authorizer
+    from ultralight_rag.auth import AuthorizationError, Authorizer
 
     protected_settings = replace(service.settings, auth_mode="trusted-proxy")
     authorizer = Authorizer(protected_settings)
-    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
         with pytest.raises(AuthorizationError):
             authorizer.authorize(
                 {
@@ -397,10 +397,10 @@ def test_auth_denial_cannot_forge_a_log_line(service, caplog):
     """
     from dataclasses import replace
 
-    from utralight_rag.auth import AuthorizationError, Authorizer
+    from ultralight_rag.auth import AuthorizationError, Authorizer
 
     forged = (
-        "mallory\n2099-01-01 00:00:00 WARNING utralight_rag.auth: "
+        "mallory\n2099-01-01 00:00:00 WARNING ultralight_rag.auth: "
         "FORGED: Authorization denied: user=admin role=admin action=write -- "
         "GRANTED role=not-a-real-role action=write"
     )
@@ -409,7 +409,7 @@ def test_auth_denial_cannot_forge_a_log_line(service, caplog):
     protected_settings = replace(service.settings, auth_mode="trusted-proxy")
     authorizer = Authorizer(protected_settings)
 
-    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
         with pytest.raises(AuthorizationError):
             authorizer.authorize(
                 {
@@ -444,7 +444,7 @@ def test_auth_logs_missing_trusted_proxy_identity(service, caplog):
     )
     client = TestClient(create_app(protected))
 
-    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
         response = client.get("/documents")
 
     assert response.status_code == 401

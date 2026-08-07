@@ -1,4 +1,4 @@
-"""Environment-backed configuration for the Utralight RAG service."""
+"""Environment-backed configuration for the Ultralight RAG service."""
 
 import os
 from dataclasses import dataclass, field

@@ -1,4 +1,4 @@
-# Utralight RAG MCP
+# Ultralight RAG MCP
 
 A small, local Retrieval-Augmented Generation (RAG) service. It stores documents and embeddings in SQLite, then exposes the same index through REST and MCP.
 
@@ -8,7 +8,7 @@ The default database is in memory for a zero-setup local experience. Set `RAG_DA
 
 ```bash
 uv sync
-uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Python 3.11 through 3.13 are supported.
@@ -20,14 +20,14 @@ RAG_EMBEDDING_PROVIDER=openai-compatible \
 RAG_EMBEDDING_URL=https://api.openai.com/v1/embeddings \
 RAG_EMBEDDING_MODEL=text-embedding-3-small \
 RAG_EMBEDDING_API_KEY="$OPENAI_API_KEY" \
-uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Sentence Transformers remains an optional legacy local provider; install its extra before selecting it, since its PyTorch runtime is not part of the base install:
 
 ```bash
 uv sync --extra local-embeddings
-RAG_EMBEDDING_PROVIDER=sentence-transformers uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+RAG_EMBEDDING_PROVIDER=sentence-transformers uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Ollama uses the same OpenAI-compatible protocol and settings; there are no separate Ollama variables:
@@ -36,7 +36,7 @@ Ollama uses the same OpenAI-compatible protocol and settings; there are no separ
 RAG_EMBEDDING_PROVIDER=ollama \
 RAG_EMBEDDING_URL=http://localhost:11434/v1/embeddings \
 RAG_EMBEDDING_MODEL=nomic-embed-text \
-uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Open the interactive API documentation at <http://127.0.0.1:8001/docs>.
@@ -46,8 +46,8 @@ Open the interactive API documentation at <http://127.0.0.1:8001/docs>.
 Each running service instance owns one index, one SQLite database, and one embedding/chunking configuration. Run separate instances for independent indexes rather than configuring collections inside one process:
 
 ```bash
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.combined:app --port 8001
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.combined:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn ultralight_rag.combined:app --port 8001
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn ultralight_rag.combined:app --port 8002
 ```
 
 Use a separate database path and port for every instance. This keeps vector spaces, chunking behavior, and lifecycle management isolated.
@@ -98,7 +98,7 @@ The combined entry point serves REST and streamable HTTP MCP from one process an
 
 ```bash
 RAG_DATABASE_PATH=/var/lib/rag/index.sqlite \
-uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 The MCP endpoint is `/mcp` by default. Register it in Claude Code with:
@@ -122,7 +122,7 @@ The indexed documents are then available through `rag_search`, `list_documents`,
 Run the MCP server over stdio (the default) when a client should spawn it directly; this mode remains a separate process:
 
 ```bash
-uv run python -m utralight_rag.mcp_server.server
+uv run python -m ultralight_rag.mcp_server.server
 ```
 
 ## Authentication and authorization
@@ -137,7 +137,7 @@ RAG_PROXY_USER_HEADER=Cf-Access-Authenticated-User-Email \
 RAG_PROXY_ROLE_HEADER=X-Auth-Request-Role \
 RAG_PROXY_ADMIN_ROLE=admin \
 RAG_PROXY_READER_ROLE=reader \
-uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.
@@ -164,7 +164,7 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_MAX_REQUEST_BYTES` | `10551296` | Maximum raw HTTP request body accepted before parsing; keep this at or above the document limit to allow request overhead. |
 | `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
 | `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
-| `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. Only used by the standalone `utralight_rag.mcp_server.server` process, not the combined app. |
+| `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. Only used by the standalone `ultralight_rag.mcp_server.server` process, not the combined app. |
 | `MCP_HOST` | `127.0.0.1` | Bind host for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--host` instead. |
 | `MCP_PORT` | `8000` | Bind port for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--port` instead. |
 | `MCP_PATH` | `/mcp` | Streamable HTTP path, used by both the standalone MCP server and the combined app's MCP mount. |

@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 def vector_rows(store: SQLiteStore) -> int:

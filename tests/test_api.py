@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from utralight_rag.api.main import BodySizeLimitMiddleware, create_app
-from utralight_rag.config import Settings
-from utralight_rag.service import RAGService
-from utralight_rag.storage.sqlite import SQLiteStore
+from ultralight_rag.api.main import BodySizeLimitMiddleware, create_app
+from ultralight_rag.config import Settings
+from ultralight_rag.service import RAGService
+from ultralight_rag.storage.sqlite import SQLiteStore
 
 
 def test_rest_lifecycle(service):

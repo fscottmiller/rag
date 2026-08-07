@@ -1,9 +1,9 @@
 import pytest
 
-from utralight_rag.config import Settings
-from utralight_rag.pipeline.embeddings import FastEmbedEmbedder, OpenAICompatibleEmbedder
-from utralight_rag.service import DocumentTooLargeError, RAGService
-from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from ultralight_rag.config import Settings
+from ultralight_rag.pipeline.embeddings import FastEmbedEmbedder, OpenAICompatibleEmbedder
+from ultralight_rag.service import DocumentTooLargeError, RAGService
+from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 class _OneChunk:
