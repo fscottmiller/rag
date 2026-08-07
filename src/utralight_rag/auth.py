@@ -60,7 +60,13 @@ class Authorizer:
             return Principal(user=user, role="admin")
         if role == self.reader_role and action == "read":
             return Principal(user=user, role="reader")
-        logger.warning("Authorization denied: user=%s role=%s action=%s", user, role, action)
+        # user and role come straight from HTTP headers (see _header(), which only
+        # strips whitespace) with no trust boundary in between, so an attacker fully
+        # controls their content. %r escapes an embedded newline instead of letting it
+        # forge a second, well-formed log line in the authorization audit trail --
+        # action is an internal literal ("read"/"write"), not attacker data, so %s is
+        # fine for it.
+        logger.warning("Authorization denied: user=%r role=%r action=%s", user, role, action)
         raise AuthorizationError("This role is not allowed to perform this action")
 
     @staticmethod

@@ -168,8 +168,12 @@ class SentenceTransformerEmbedder(BaseEmbedder):
                 self.model.encode(inputs, convert_to_numpy=True).tolist(), len(inputs)
             )
         except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+            # exc is raised by the local model library against `texts` -- document
+            # content or the search query, both user-supplied -- so %r escapes it the
+            # same way provider response detail is escaped below, instead of letting
+            # an embedded newline forge a log line.
             logger.error(
-                "SentenceTransformers embedder (model=%s) returned invalid embeddings: %s",
+                "SentenceTransformers embedder (model=%s) returned invalid embeddings: %r",
                 self.model_name,
                 exc,
             )
@@ -203,8 +207,12 @@ class FastEmbedEmbedder(BaseEmbedder):
         try:
             vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
         except (AttributeError, TypeError, ValueError) as exc:
+            # exc is raised by the local model library against `texts` -- document
+            # content or the search query, both user-supplied -- so %r escapes it the
+            # same way provider response detail is escaped below, instead of letting
+            # an embedded newline forge a log line.
             logger.error(
-                "FastEmbed embedder (model=%s) returned invalid embeddings: %s",
+                "FastEmbed embedder (model=%s) returned invalid embeddings: %r",
                 self.model_name,
                 exc,
             )
@@ -213,7 +221,7 @@ class FastEmbedEmbedder(BaseEmbedder):
             return _validated_embeddings(vectors, len(inputs))
         except RuntimeError as exc:
             logger.error(
-                "FastEmbed embedder (model=%s) returned invalid embeddings: %s",
+                "FastEmbed embedder (model=%s) returned invalid embeddings: %r",
                 self.model_name,
                 exc,
             )

@@ -384,6 +384,50 @@ def test_service_logs_authorization_denials_with_principal_and_action(service, c
     assert "write" in log_text
 
 
+def test_auth_denial_cannot_forge_a_log_line(service, caplog):
+    """A real newline in an attacker-controlled proxy header must not produce
+    a second, forged log record in the authorization audit trail.
+
+    user/role come straight from HTTP headers with no trust boundary in
+    between (Authorizer._header only strips whitespace at the ends, so an
+    embedded newline survives). Interpolated with %s, that newline yields a
+    complete, well-formed fake WARNING record -- including a bogus
+    authorization grant -- appended to the very audit log that records
+    authorization decisions. %r escapes it to a literal backslash-n instead.
+    """
+    from dataclasses import replace
+
+    from utralight_rag.auth import AuthorizationError, Authorizer
+
+    forged = (
+        "mallory\n2099-01-01 00:00:00 WARNING utralight_rag.auth: "
+        "FORGED: Authorization denied: user=admin role=admin action=write -- "
+        "GRANTED role=not-a-real-role action=write"
+    )
+    assert "\n" in forged, "the probe must carry a real newline, not an escaped one"
+
+    protected_settings = replace(service.settings, auth_mode="trusted-proxy")
+    authorizer = Authorizer(protected_settings)
+
+    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+        with pytest.raises(AuthorizationError):
+            authorizer.authorize(
+                {
+                    protected_settings.proxy_user_header: forged,
+                    protected_settings.proxy_role_header: "reader",
+                },
+                "write",
+            )
+
+    assert caplog.records, "the authorization denial must be logged at all"
+    for record in caplog.records:
+        assert "\n" not in record.getMessage(), (
+            "a raw newline reached the log record, so proxy headers can forge log lines"
+        )
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "FORGED" in logged, "detail must still be logged, just escaped"
+
+
 def test_auth_logs_missing_trusted_proxy_identity(service, caplog):
     """The 'no identity' denial log had line coverage but no behavior test.
 
