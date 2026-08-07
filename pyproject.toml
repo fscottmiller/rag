@@ -1,7 +1,7 @@
 [project]
-name = "utralight-rag-mcp"
+name = "ultralight-rag-mcp"
 version = "0.1.0"
-description = "Utralight RAG service with REST and MCP interfaces"
+description = "Ultralight RAG service with REST and MCP interfaces"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -43,12 +43,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/utralight_rag"]
+packages = ["src/ultralight_rag"]
 
 
 [tool.coverage.run]
 branch = true
-source = ["utralight_rag"]
+source = ["ultralight_rag"]
 
 [tool.coverage.report]
 show_missing = true
@@ -81,9 +81,9 @@ filterwarnings = [
 # manual trigger only (.github/workflows/mutation.yml), never on push/PR.
 source_paths = ["src"]
 only_mutate = [
-  "src/utralight_rag/auth.py",
-  "src/utralight_rag/storage/sqlite.py",
-  "src/utralight_rag/pipeline/embeddings.py",
+  "src/ultralight_rag/auth.py",
+  "src/ultralight_rag/storage/sqlite.py",
+  "src/ultralight_rag/pipeline/embeddings.py",
 ]
 # Restricting to the tests that actually exercise these modules keeps each
 # mutant's test run fast, and (found empirically) avoids a mutmut quirk: it
@@ -128,7 +128,7 @@ select = ["E", "F", "I", "B", "S", "ASYNC", "UP"]
 # missing sentence-transformers stub) that are out of scope for this PR and
 # would need their own dedicated cleanup to gate on.
 python_version = "3.12"
-files = ["src/utralight_rag/mcp_server"]
+files = ["src/ultralight_rag/mcp_server"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true

@@ -1,7 +1,7 @@
 import pytest
 
-from utralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer, Principal
-from utralight_rag.config import Settings
+from ultralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer, Principal
+from ultralight_rag.config import Settings
 
 
 def test_no_auth_mode_grants_every_action_as_anonymous_admin():

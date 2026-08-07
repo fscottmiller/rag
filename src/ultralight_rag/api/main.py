@@ -118,7 +118,7 @@ def create_app(
 ) -> FastAPI:
     rag = service or RAGService()
     authorizer = Authorizer(rag.settings)
-    app = FastAPI(title="Utralight RAG MCP", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Ultralight RAG MCP", version="0.1.0", lifespan=lifespan)
     app.state.rag = rag
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=rag.settings.max_request_bytes)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(rag.settings.trusted_hosts))

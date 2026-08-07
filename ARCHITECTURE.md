@@ -1,8 +1,8 @@
-# Utralight RAG MCP server architecture
+# Ultralight RAG MCP server architecture
 
 ## Overview
 
-Utralight provides a local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations. The combined streamable-HTTP entry point mounts both adapters in one FastAPI process and injects the same service into each.
+Ultralight provides a local context index with two adapters: a resource-oriented FastAPI REST API and a FastMCP server. Both adapters call `RAGService`; they do not contain separate ingestion or retrieval implementations. The combined streamable-HTTP entry point mounts both adapters in one FastAPI process and injects the same service into each.
 
 Each service process owns exactly one index and one SQLite database. The default database is in memory; set `RAG_DATABASE_PATH` to use one local SQLite file when a process restart should preserve that index. Independent indexes run as independent service instances rather than as collections inside one process. The design intentionally does not include background jobs, evaluation metrics, synthetic QA generation, or benchmark code.
 REST handlers that call the synchronous service run as regular FastAPI handlers, so Starlette dispatches them to its threadpool. Multipart request parsing remains asynchronous, but embedding work is explicitly offloaded before it reaches the service. `SQLiteStore` serializes connection operations with a re-entrant lock; this keeps the single-connection design safe for concurrent threadpool requests. SQLite WAL mode and a busy timeout provide additional safety when a stdio MCP process happens to access the same file-backed index.
@@ -10,14 +10,14 @@ REST handlers that call the synchronous service run as regular FastAPI handlers,
 
 ## Components
 
-- `src/utralight_rag/api`: JSON and multipart REST routes for document CRUD and search.
-- `src/utralight_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
-- `src/utralight_rag/combined.py`: Combined REST and streamable HTTP MCP entry point with one injected service.
-- `src/utralight_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
-- `src/utralight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, FastEmbed, legacy local, and OpenAI-compatible embedding implementations.
-- `src/utralight_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
+- `src/ultralight_rag/api`: JSON and multipart REST routes for document CRUD and search.
+- `src/ultralight_rag/mcp_server`: FastMCP tools with direct mappings to the service operations.
+- `src/ultralight_rag/combined.py`: Combined REST and streamable HTTP MCP entry point with one injected service.
+- `src/ultralight_rag/storage`: SQLite schema and sqlite-vec virtual table. Documents and chunks are ordinary relational rows; vectors are stored in `vec_chunks`.
+- `src/ultralight_rag/pipeline`: `BaseChunker` and `BaseEmbedder` interfaces plus Chonkie, FastEmbed, legacy local, and OpenAI-compatible embedding implementations.
+- `src/ultralight_rag/service.py`: shared orchestration for chunking, embedding, CRUD, and vector search.
 
-The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for a Utralight deployment, but large filtered indexes would need database-side filtering or metadata indexes.
+The vector table uses cosine distance so the returned `score` remains an interpretable similarity approximation. Metadata filters are applied after KNN retrieval in Python; the service deliberately scans enough candidates for a Ultralight deployment, but large filtered indexes would need database-side filtering or metadata indexes.
 
 ## Architectural decisions
 
@@ -31,11 +31,11 @@ Alternative: older Python versions would increase compatibility burden and are n
 
 SQLite provides zero-service local storage and a single-file deployment option. sqlite-vec adds KNN vector search without an external database or operational infrastructure. Foreign keys and explicit vector-row deletion keep document deletion consistent with the vector index.
 
-Alternative: Milvus, Qdrant, Pinecone, and similar services provide more scale but violate Utralight's minimal infrastructure goal.
+Alternative: Milvus, Qdrant, Pinecone, and similar services provide more scale but violate Ultralight's minimal infrastructure goal.
 
 ### ADR-003: Chonkie for chunking
 
-Chonkie is wrapped by `BaseChunker`, keeping the service independent of Chonkie's concrete API while providing recursive, sentence, and token strategies. Chunking strategy, size, and overlap are fixed by the service instance so all documents in one index have consistent retrieval behavior. Because Chonkie's recursive chunker has no overlap option, Utralight applies the configured overlap by extending each recursive chunk with trailing characters from its predecessor.
+Chonkie is wrapped by `BaseChunker`, keeping the service independent of Chonkie's concrete API while providing recursive, sentence, and token strategies. Chunking strategy, size, and overlap are fixed by the service instance so all documents in one index have consistent retrieval behavior. Because Chonkie's recursive chunker has no overlap option, Ultralight applies the configured overlap by extending each recursive chunk with trailing characters from its predecessor.
 
 Alternative: custom splitting would be smaller initially but would duplicate boundary and tokenization behavior that Chonkie already provides.
 
@@ -51,7 +51,7 @@ REST and MCP are transport adapters around exactly one `RAGService`. This avoids
 
 Alternative: implementing logic separately in route and tool handlers would be simpler for a prototype but would make fixes inconsistent.
 
-### ADR-006: Utralight storage lifecycle
+### ADR-006: Ultralight storage lifecycle
 
 The default `:memory:` database keeps local setup fast and dependency-free. File-backed SQLite is also supported when an index should survive process restarts or be shared with a separately spawned stdio MCP process. The combined streamable-HTTP entry point uses one in-process store for both adapters, avoiding duplicate embedding models. Migrations, replication, retention policies, and production-scale storage operations are intentionally out of scope.
 
@@ -59,7 +59,7 @@ The default `:memory:` database keeps local setup fast and dependency-free. File
 
 A service process owns one SQLite index, one embedding configuration, and one chunking configuration. To run independent indexes, deploy independent service instances with separate database paths and ports. This keeps collection routing, mixed embedding spaces, and per-document configuration out of the core service.
 
-This also makes index isolation explicit: one process owns one database file, and an index can be removed by stopping the instance and deleting its database file. The additional operational cost is limited to process supervision and port/configuration management, which is appropriate for a small number of Utralight indexes.
+This also makes index isolation explicit: one process owns one database file, and an index can be removed by stopping the instance and deleting its database file. The additional operational cost is limited to process supervision and port/configuration management, which is appropriate for a small number of Ultralight indexes.
 
 Alternative: collections inside one process would reduce the number of processes but would require collection-aware API and MCP contracts, routing, authorization, and configuration validation. That complexity is deferred unless the number of indexes makes process-per-index management impractical.
 
@@ -100,14 +100,14 @@ uv sync
 
 # One process serves REST and streamable HTTP MCP on one index.
 RAG_DATABASE_PATH=/var/lib/rag/index.sqlite \
-  uv run uvicorn utralight_rag.combined:app --host 127.0.0.1 --port 8001
+  uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 
 # Independent indexes still use separate combined instances.
-RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn utralight_rag.combined:app --port 8002
-RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn utralight_rag.combined:app --port 8003
+RAG_DATABASE_PATH=/var/lib/rag/index-a.sqlite uv run uvicorn ultralight_rag.combined:app --port 8002
+RAG_DATABASE_PATH=/var/lib/rag/index-b.sqlite uv run uvicorn ultralight_rag.combined:app --port 8003
 
 # Stdio remains client-spawned and separate from the combined entry point.
-uv run python -m utralight_rag.mcp_server.server
+uv run python -m ultralight_rag.mcp_server.server
 uv run pytest
 ```
 

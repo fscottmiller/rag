@@ -1,0 +1,1 @@
+"""Ultralight RAG MCP service."""

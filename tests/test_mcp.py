@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from mcp.server.fastmcp.exceptions import ToolError
 
-from utralight_rag.combined import create_combined_app
-from utralight_rag.mcp_server.server import create_mcp, get_transport
-from utralight_rag.service import RAGService
+from ultralight_rag.combined import create_combined_app
+from ultralight_rag.mcp_server.server import create_mcp, get_transport
+from ultralight_rag.service import RAGService
 
 
 def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeypatch):
@@ -20,8 +20,8 @@ def test_mcp_transport_defaults_to_stdio_and_only_allows_streamable_http(monkeyp
 
 
 def test_combined_import_does_not_create_an_unused_rest_app():
-    import utralight_rag.api as api
-    import utralight_rag.api.main as api_main
+    import ultralight_rag.api as api
+    import ultralight_rag.api.main as api_main
 
     assert api_main._default_app is None
     assert api_main.app is api_main.get_app()
@@ -67,7 +67,7 @@ async def test_mcp_tools_share_service_lifecycle(service):
 
 @pytest.mark.asyncio
 async def test_mcp_search_top_k_advertises_the_same_bounds_as_rest(service):
-    """REST's SearchPayload.top_k is `ge=1, le=100` (src/utralight_rag/api/models.py).
+    """REST's SearchPayload.top_k is `ge=1, le=100` (src/ultralight_rag/api/models.py).
     rag_search's inputSchema previously advertised no bounds at all, so a client
     had no way to discover the limit short of trying an out-of-range value."""
     server = create_mcp(service)
@@ -124,7 +124,7 @@ async def test_mcp_document_tools_offload_storage_calls(service, monkeypatch):
         calls.append((function, args))
         return function(*args)
 
-    monkeypatch.setattr("utralight_rag.mcp_server.server.anyio.to_thread.run_sync", run_sync)
+    monkeypatch.setattr("ultralight_rag.mcp_server.server.anyio.to_thread.run_sync", run_sync)
     server = create_mcp(service)
     await server.call_tool("list_documents", {})
     await server.call_tool("get_document", {"document_id": document["id"]})

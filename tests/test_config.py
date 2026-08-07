@@ -1,6 +1,6 @@
 import pytest
 
-from utralight_rag.config import Settings
+from ultralight_rag.config import Settings
 
 
 def test_settings_defaults_are_in_memory_and_fastembed():

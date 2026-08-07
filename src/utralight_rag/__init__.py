@@ -1,1 +1,0 @@
-"""Utralight RAG MCP service."""
