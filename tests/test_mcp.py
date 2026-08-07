@@ -268,6 +268,7 @@ def test_mcp_rejects_cross_origin_for_wildcard_host(service, origin):
         )
     assert response.status_code == 403
 
+
 @pytest.mark.asyncio
 async def test_mcp_origin_middleware_rejects_cross_origin():
     from ultralight_rag.combined import MCPOriginMiddleware
@@ -290,6 +291,7 @@ async def test_mcp_origin_middleware_rejects_cross_origin():
     }
 
     responses = []
+
     async def send(message):
         responses.append(message)
 
@@ -299,7 +301,14 @@ async def test_mcp_origin_middleware_rejects_cross_origin():
     await middleware(scope, receive, send)
 
     assert len(responses) == 2
-    assert responses[0] == {"type": "http.response.start", "status": 403, "headers": [(b"content-length", b"21"), (b"content-type", b"text/plain; charset=utf-8")]}
+    assert responses[0] == {
+        "type": "http.response.start",
+        "status": 403,
+        "headers": [
+            (b"content-length", b"21"),
+            (b"content-type", b"text/plain; charset=utf-8"),
+        ],
+    }
     assert responses[1] == {"type": "http.response.body", "body": b"Invalid Origin header"}
 
 
@@ -326,6 +335,7 @@ async def test_mcp_origin_middleware_allows_same_origin():
     }
 
     responses = []
+
     async def send(message):
         responses.append(message)
 
