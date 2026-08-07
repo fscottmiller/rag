@@ -231,6 +231,21 @@ def test_search_score_is_cosine_similarity_ranging_from_negative_one_to_one():
     store.close()
 
 
+def test_preflight_embedding_configuration_rejects_stale_identity():
+    store = SQLiteStore()
+    store.ensure_embedding_configuration("provider1", "model1", "fingerprint1")
+
+    with pytest.raises(
+        ValueError, match="Index embedding configuration does not match this service"
+    ):
+        store.preflight_embedding_configuration(("provider1", "model2", "fingerprint2"))
+
+    # None should not raise
+    store.preflight_embedding_configuration(None)
+    # matching configuration should not raise
+    store.preflight_embedding_configuration(("provider1", "model1", "fingerprint1"))
+
+
 def test_ensure_vector_table_rejects_mismatched_dimension_on_same_store():
     # sqlite.py:101-102 is the last defense against mixing vector spaces in
     # one index when there is no recorded embedding identity (the config
