@@ -68,13 +68,15 @@ class Authorizer:
         # fine for it.
         safe_user = self._escape(user)
         safe_role = self._escape(role)
-        logger.warning("Authorization denied: user=%s role=%s action=%s", safe_user, safe_role, action)
+        logger.warning(
+            "Authorization denied: user=%s role=%s action=%s", safe_user, safe_role, action
+        )
         raise AuthorizationError("This role is not allowed to perform this action")
 
     @staticmethod
     def _escape(val: str) -> str:
         """Escape control and non-printable characters for safe logging."""
-        return "".join(c if c.isprintable() else r"\x{:02x}".format(ord(c)) for c in val)
+        return "".join(c if c.isprintable() else rf"\x{ord(c):02x}" for c in val)
 
     @staticmethod
     def _header(headers: Mapping[str, str], name: str) -> str:
