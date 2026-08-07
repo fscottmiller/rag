@@ -235,7 +235,9 @@ def test_preflight_embedding_configuration_rejects_stale_identity():
     store = SQLiteStore()
     store.ensure_embedding_configuration("provider1", "model1", "fingerprint1")
 
-    with pytest.raises(ValueError, match="Index embedding configuration does not match this service"):
+    with pytest.raises(
+        ValueError, match="Index embedding configuration does not match this service"
+    ):
         store.preflight_embedding_configuration(("provider1", "model2", "fingerprint2"))
 
     # None should not raise
