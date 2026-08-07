@@ -236,29 +236,34 @@ async def _read_document_request(request: Request) -> dict[str, Any]:
         if len(payload["content"].encode("utf-8")) > max_bytes:
             raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
         return payload
-    form = await request.form()
-    upload = form.get("file")
-    if isinstance(upload, UploadFile):
-        content_bytes = await upload.read(max_bytes + 1)
-        if len(content_bytes) > max_bytes:
-            raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
-        content = content_bytes.decode("utf-8")
-        title = str(form.get("title") or upload.filename or "untitled")
-    else:
-        content = str(form.get("content") or "")
-        if len(content.encode("utf-8")) > max_bytes:
-            raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
-        title = str(form.get("title") or "untitled")
-    metadata: Any = form.get("metadata", {})
-    if isinstance(metadata, str):
-        metadata = json.loads(metadata) if metadata else {}
+    # The form (and any UploadFile it backs, which owns a SpooledTemporaryFile)
+    # must be closed once we're done with it, hence the context manager. The
+    # uploaded bytes are read out *before* the `async with` block exits --
+    # closing the form invalidates the UploadFile, so all access to `upload`
+    # and `form` must stay inside this block.
+    async with request.form() as form:
+        upload = form.get("file")
+        if isinstance(upload, UploadFile):
+            content_bytes = await upload.read(max_bytes + 1)
+            if len(content_bytes) > max_bytes:
+                raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
+            content = content_bytes.decode("utf-8")
+            title = str(form.get("title") or upload.filename or "untitled")
+        else:
+            content = str(form.get("content") or "")
+            if len(content.encode("utf-8")) > max_bytes:
+                raise DocumentTooLargeError(f"document content exceeds {max_bytes} bytes")
+            title = str(form.get("title") or "untitled")
+        metadata: Any = form.get("metadata", {})
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata) if metadata else {}
 
-    payload = {"title": title, "content": content, "metadata": metadata}
-    forbidden_options = {
-        name: form.get(name)
-        for name in ("chunking_strategy", "chunk_size", "chunk_overlap", "embedding_choice")
-        if form.get(name) not in (None, "")
-    }
+        payload = {"title": title, "content": content, "metadata": metadata}
+        forbidden_options = {
+            name: form.get(name)
+            for name in ("chunking_strategy", "chunk_size", "chunk_overlap", "embedding_choice")
+            if form.get(name) not in (None, "")
+        }
     if forbidden_options:
         raise ValueError("Per-document embedding and chunking overrides are not supported")
     return DocumentPayload.model_validate(payload).model_dump()
