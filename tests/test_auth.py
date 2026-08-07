@@ -1,13 +1,20 @@
 import pytest
 
-from utralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer
+from utralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer, Principal
 from utralight_rag.config import Settings
 
 
-def test_no_auth_mode_grants_every_action():
+def test_no_auth_mode_grants_every_action_as_anonymous_admin():
     authorizer = Authorizer(Settings())
     for action in ("read", "write", "delete"):
-        assert authorizer.authorize({}, action).role == "admin"
+        assert authorizer.authorize({}, action) == Principal(user="anonymous", role="admin")
+
+
+def test_no_auth_mode_ignores_action_value_and_still_grants_anonymous_admin():
+    authorizer = Authorizer(Settings())
+    assert authorizer.authorize({}, "totally-unrecognized-action") == Principal(
+        user="anonymous", role="admin"
+    )
 
 
 def test_trusted_proxy_requires_identity_and_maps_roles():
@@ -24,14 +31,12 @@ def test_trusted_proxy_requires_identity_and_maps_roles():
         authorizer.authorize({}, "read")
     with pytest.raises(AuthorizationError):
         authorizer.authorize({"X-User": "reader@example.test", "X-Role": "viewer"}, "write")
-    assert (
-        authorizer.authorize({"X-User": "reader@example.test", "X-Role": "viewer"}, "read").role
-        == "reader"
-    )
-    assert (
-        authorizer.authorize({"X-User": "admin@example.test", "X-Role": "owner"}, "delete").role
-        == "admin"
-    )
+    assert authorizer.authorize(
+        {"X-User": "reader@example.test", "X-Role": "viewer"}, "read"
+    ) == Principal(user="reader@example.test", role="reader")
+    assert authorizer.authorize(
+        {"X-User": "admin@example.test", "X-Role": "owner"}, "delete"
+    ) == Principal(user="admin@example.test", role="admin")
 
 
 def test_trusted_proxy_rejects_unknown_roles():
