@@ -93,3 +93,26 @@ def test_trusted_proxy_strips_surrounding_whitespace_from_header_values():
     )
 
     assert principal == Principal(user="admin@example.test", role="admin")
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("none", "none"),
+        ("NONE", "none"),
+        ("None", "none"),
+        ("trusted-proxy", "trusted-proxy"),
+        ("trusted_proxy", "trusted-proxy"),
+        ("Trusted_Proxy", "trusted-proxy"),
+        ("TRUSTED-PROXY", "trusted-proxy"),
+    ],
+)
+def test_auth_mode_is_normalized_for_case_and_underscores(configured, expected):
+    """RAG_AUTH_MODE accepts case and underscore variants.
+
+    The env var invites snake_case, so `trusted_proxy` must resolve the same as
+    the documented `trusted-proxy`; getting a ValueError at startup for that
+    would be a hostile surprise. Neither half of the normalization was pinned:
+    dropping `.lower()` or `.replace("_", "-")` each left all 161 tests green.
+    """
+    assert Authorizer(Settings(auth_mode=configured)).mode == expected
