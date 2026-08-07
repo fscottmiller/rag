@@ -28,7 +28,116 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      # filterwarnings = ["error", ...narrow ignores...] in [tool.pytest.ini_options]
+      # (pyproject.toml) turns any warning pytest doesn't already know about into a
+      # test failure. That's what would have caught the httpx2-removal
+      # DeprecationWarning regression automatically instead of by manual audit.
+      # pytest-randomly (dev dependency) also randomizes test order on every run,
+      # across all three Python versions here, to surface ordering/state leaks
+      # between tests without needing a dedicated job.
       - name: Run tests with coverage
         run: uv run coverage run -m pytest && uv run coverage report
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
       - name: Run lint and format checks
         run: uvx ruff check . && uvx ruff format --check .
+
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # Fails if uv.lock is missing or out of sync with pyproject.toml -- e.g. a
+      # dependency edit that was never relocked. Confirmed with `uv --version`
+      # (0.8.17) that `--check` is the current flag name for this uv release.
+      - name: Verify uv.lock is up to date
+        run: uv lock --check
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # `uv export` includes a `-e .` line for the local project itself, which
+      # pip-audit can't look up on PyPI and would otherwise report as a spurious
+      # "not found" skip on every run. Filter it out before auditing so the only
+      # output is real findings against real third-party packages.
+      - name: Export dependencies
+        run: |
+          uv export --format requirements-txt --all-extras --no-hashes \
+            | grep -v '^-e ' > requirements-audit.txt
+
+      # Blocks merge: a real CVE (PYSEC-2026-3552, transitive `cryptography`)
+      # shipped on main and was only caught by a manual audit. Vulnerability
+      # scanning replaces that manual step, so it must gate merges the same way
+      # tests and lint do -- a report-only job would have let this incident
+      # through CI unnoticed, same as before.
+      - name: Audit dependencies for known vulnerabilities
+        run: uvx pip-audit -r requirements-audit.txt
+
+  build-and-import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build wheel
+        run: uv build --wheel -o dist
+
+      # Installs the *built wheel artifact* (not the source tree) into a fresh
+      # venv so a broken [tool.hatch.build.targets.wheel] `packages` path -- or
+      # any other src-layout packaging mistake -- fails here instead of shipping
+      # silently. `uv sync`/editable installs would not catch this: they use the
+      # source tree directly and never exercise the wheel's file layout.
+      - name: Install wheel into a clean environment and import it
+        run: |
+          uv venv /tmp/wheel-check-venv
+          uv pip install --python /tmp/wheel-check-venv/bin/python dist/*.whl
+          /tmp/wheel-check-venv/bin/python -c "import utralight_rag; print(utralight_rag.__file__)"
