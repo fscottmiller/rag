@@ -267,3 +267,73 @@ def test_mcp_rejects_cross_origin_for_wildcard_host(service, origin):
             "/mcp", json={}, headers={"accept": "application/json", "origin": origin}
         )
     assert response.status_code == 403
+
+@pytest.mark.asyncio
+async def test_mcp_origin_middleware_rejects_cross_origin():
+    from ultralight_rag.combined import MCPOriginMiddleware
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"OK"})
+
+    middleware = MCPOriginMiddleware(inner_app)
+
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"origin", b"https://evil.example"),
+            (b"host", b"good.example"),
+        ],
+        "server": ("good.example", 443),
+        "path": "/",
+        "query_string": b"",
+    }
+
+    responses = []
+    async def send(message):
+        responses.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    await middleware(scope, receive, send)
+
+    assert len(responses) == 2
+    assert responses[0] == {"type": "http.response.start", "status": 403, "headers": [(b"content-length", b"21"), (b"content-type", b"text/plain; charset=utf-8")]}
+    assert responses[1] == {"type": "http.response.body", "body": b"Invalid Origin header"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_origin_middleware_allows_same_origin():
+    from ultralight_rag.combined import MCPOriginMiddleware
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"OK"})
+
+    middleware = MCPOriginMiddleware(inner_app)
+
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"origin", b"https://good.example"),
+            (b"host", b"good.example"),
+        ],
+        "server": ("good.example", 443),
+        "path": "/",
+        "query_string": b"",
+        "scheme": "https",
+    }
+
+    responses = []
+    async def send(message):
+        responses.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    await middleware(scope, receive, send)
+
+    assert len(responses) == 2
+    assert responses[0] == {"type": "http.response.start", "status": 200}
+    assert responses[1] == {"type": "http.response.body", "body": b"OK"}
