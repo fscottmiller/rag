@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
@@ -32,11 +32,35 @@ _ALLOWED_TRANSPORTS = {"stdio", "streamable-http"}
 # `isinstance(result, CallToolResult)` unconditionally -- before consulting the
 # annotation at all -- so returning a `CallToolResult` already worked prior to
 # this change; only the *declared* type was a lie. This alias makes it honest:
-# mypy resolves `Annotated[X, ...]` to `X` (PEP 593), so these tools are now
-# correctly typed as "returns CallToolResult" for the denial/failure paths.
-SearchResult = Annotated[CallToolResult, list[dict[str, Any]]]
-DocumentResult = Annotated[CallToolResult, dict[str, Any]]
-DeleteResult = Annotated[CallToolResult, dict[str, str]]
+# mypy resolves `Annotated[X, ...]` to `X` (PEP 593) and ignores the second
+# argument entirely for type-checking purposes -- it does NOT replicate the
+# SDK's special-casing. So a plain `Annotated[CallToolResult, T]` alias makes
+# mypy believe every one of these tools always returns bare `CallToolResult`,
+# which then misflags the ordinary success-path returns (the actual `T`
+# values) as errors, even though those are exactly as correct as the
+# denial/failure paths that return `CallToolResult` directly.
+#
+# To give mypy the honest union type (`CallToolResult | T`) it needs to check
+# *both* paths, without changing what the SDK sees at runtime, the alias is
+# defined differently for static analysis than for execution:
+#   - `TYPE_CHECKING` is only True while a type checker is running, so mypy
+#     type-checks against `CallToolResult | T` and correctly accepts returns
+#     of either shape while still rejecting anything else.
+#   - At runtime `TYPE_CHECKING` is always False, so the SDK (which resolves
+#     this module's annotations via `get_type_hints`, evaluated against these
+#     same module globals, after `from __future__ import annotations` has
+#     deferred them to strings) sees exactly `Annotated[CallToolResult, T]` --
+#     unchanged from before, so `func_metadata`'s
+#     `issubclass(return_type_expr, CallToolResult)` special case still fires
+#     and the emitted `outputSchema` is still derived from `T`, byte-for-byte.
+if TYPE_CHECKING:
+    SearchResult = CallToolResult | list[dict[str, Any]]
+    DocumentResult = CallToolResult | dict[str, Any]
+    DeleteResult = CallToolResult | dict[str, str]
+else:
+    SearchResult = Annotated[CallToolResult, list[dict[str, Any]]]
+    DocumentResult = Annotated[CallToolResult, dict[str, Any]]
+    DeleteResult = Annotated[CallToolResult, dict[str, str]]
 
 
 def get_transport() -> str:
@@ -58,7 +82,13 @@ def create_mcp(
         "utralight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
-        streamable_http_path=streamable_http_path or os.getenv("MCP_PATH", "/mcp"),
+        # mypy does not narrow `str | None or str` down to plain `str` here (it
+        # keeps `None` in the join even though `None` is always falsy and thus
+        # can never survive `or`) -- a known imprecision in its truthiness
+        # narrowing for `or`-fallback expressions, not a real bug: the `or`
+        # guarantees a `str` at runtime, and pre-existing/unrelated to this PR.
+        streamable_http_path=streamable_http_path  # type: ignore[arg-type]
+        or os.getenv("MCP_PATH", "/mcp"),
         transport_security=transport_security,
     )
 
@@ -202,4 +232,11 @@ def __getattr__(name: str) -> Any:
 
 
 if __name__ == "__main__":
-    get_mcp().run(transport=get_transport())
+    # get_transport() validates its result against _ALLOWED_TRANSPORTS at
+    # runtime (raising ValueError otherwise), but its declared return type is
+    # plain `str`, not the `Literal["stdio", "sse", "streamable-http"]`
+    # `FastMCP.run` expects, so mypy cannot statically prove membership.
+    # Narrowing the return type to a Literal would require duplicating
+    # _ALLOWED_TRANSPORTS as a Literal alias for no behavioral benefit;
+    # pre-existing/unrelated to this PR.
+    get_mcp().run(transport=get_transport())  # type: ignore[arg-type]
