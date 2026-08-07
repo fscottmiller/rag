@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from utralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
@@ -26,6 +28,28 @@ def test_storage_round_trip_and_chunk_metadata():
     assert [chunk["ordinal"] for chunk in document["chunks"]] == [0, 1]
     assert [chunk["text"] for chunk in document["chunks"]] == ["first", "second"]
     assert vector_rows(store) == 2
+    store.close()
+
+
+def test_store_is_usable_as_a_context_manager_and_closes_on_exit():
+    with SQLiteStore() as store:
+        store.create_document("Guide", "text", {}, ["chunk"], [[1.0, 0.0]])
+        assert vector_rows(store) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.connection.execute("SELECT 1")
+
+
+def test_store_context_manager_closes_even_when_the_body_raises():
+    with pytest.raises(ValueError):
+        with SQLiteStore() as store:
+            raise ValueError("boom")
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.connection.execute("SELECT 1")
+
+
+def test_close_is_idempotent():
+    store = SQLiteStore()
+    store.close()
     store.close()
 
 
