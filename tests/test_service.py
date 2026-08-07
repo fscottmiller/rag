@@ -356,6 +356,57 @@ def test_embedding_endpoint_rejects_embedded_credentials():
             OpenAICompatibleEmbedder("model", url, "api-secret")
 
 
+@pytest.mark.parametrize("name", ["auth", "authorization", "sig"])
+def test_embedding_endpoint_rejects_set_membership_parameter_names(name):
+    # These names match the predicate's set-membership arm exactly but do not
+    # end with any of the suffix-arm strings ("key", "token", "secret",
+    # "password", "credential", "signature"). If the predicate's `or` were
+    # mutated to `and`, these would no longer be rejected.
+    url = f"https://embedding.example/v1/embeddings?{name}=secret"
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleEmbedder("model", url, "api-secret")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "apikey",
+        "clientToken",
+        "apiSecret",
+        "userPassword",
+        "clientCredential",
+        "requestSignature",
+    ],
+)
+def test_embedding_endpoint_rejects_every_credential_suffix(name):
+    # Each of these names ends with one of the six suffix-arm strings but is
+    # not itself in the membership set {"auth", "authorization", "sig"}. This
+    # isolates the suffix arm and, individually, pins each tuple entry so a
+    # mutant that drops any single suffix is caught.
+    url = f"https://embedding.example/v1/embeddings?{name}=secret"
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleEmbedder("model", url, "api-secret")
+
+
+@pytest.mark.parametrize("name", ["API-KEY", "api_key", "Api.Key"])
+def test_embedding_endpoint_normalizes_parameter_names_before_matching(name):
+    # The predicate strips non-alphanumeric characters and lowercases before
+    # comparing, so differently-punctuated/cased spellings of the same
+    # logical parameter name must all be treated identically.
+    url = f"https://embedding.example/v1/embeddings?{name}=secret"
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleEmbedder("model", url, "api-secret")
+
+
+@pytest.mark.parametrize("name", ["api-version", "model", "timeout"])
+def test_embedding_endpoint_allows_benign_query_parameters(name):
+    # Getting the predicate wrong in the other direction would break
+    # legitimate endpoints; these benign names must not be flagged.
+    url = f"https://embedding.example/v1/embeddings?{name}=value"
+    embedder = OpenAICompatibleEmbedder("model", url, "api-secret")
+    assert embedder.url == url
+
+
 def test_embedding_endpoint_keeps_non_secret_query_parameters_in_identity(tmp_path):
     database = tmp_path / "index.sqlite3"
     first = RAGService(
