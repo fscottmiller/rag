@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -49,11 +52,21 @@ class Authorizer:
         user = self._header(headers, self.user_header)
         role = self._header(headers, self.role_header)
         if not user:
+            logger.warning(
+                "Authorization denied: no trusted proxy identity present, action=%s", action
+            )
             raise AuthenticationError("Trusted proxy identity is required")
         if role == self.admin_role:
             return Principal(user=user, role="admin")
         if role == self.reader_role and action == "read":
             return Principal(user=user, role="reader")
+        # user and role come straight from HTTP headers (see _header(), which only
+        # strips whitespace) with no trust boundary in between, so an attacker fully
+        # controls their content. %r escapes an embedded newline instead of letting it
+        # forge a second, well-formed log line in the authorization audit trail --
+        # action is an internal literal ("read"/"write"), not attacker data, so %s is
+        # fine for it.
+        logger.warning("Authorization denied: user=%r role=%r action=%s", user, role, action)
         raise AuthorizationError("This role is not allowed to perform this action")
 
     @staticmethod

@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .config import Settings
 from .pipeline.chunking import BaseChunker, ChonkieChunker
-from .pipeline.embeddings import BaseEmbedder, create_embedder, embedding_configuration
+from .pipeline.embeddings import (
+    BaseEmbedder,
+    EmbeddingProviderError,
+    create_embedder,
+    embedding_configuration,
+)
 from .storage.sqlite import SQLiteStore
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentTooLargeError(ValueError):
@@ -84,8 +92,12 @@ class RAGService:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
         self.store.preflight_embedding_configuration(self._embedding_identity)
-        chunks, embeddings = self._prepare(content)
-        return self.store.create_document(
+        try:
+            chunks, embeddings = self._prepare(content)
+        except EmbeddingProviderError:
+            logger.warning("Embedding provider failure while ingesting document %r", title)
+            raise
+        document = self.store.create_document(
             title,
             content,
             metadata or {},
@@ -93,6 +105,10 @@ class RAGService:
             embeddings,
             expected_embedding_identity=self._embedding_identity,
         )
+        logger.info(
+            "Document ingested: id=%s title=%r chunk_count=%d", document["id"], title, len(chunks)
+        )
+        return document
 
     def update(
         self,
@@ -105,8 +121,16 @@ class RAGService:
             raise ValueError("title must contain at least one non-whitespace character")
         self.store.get_document(document_id)
         self.store.preflight_embedding_configuration(self._embedding_identity)
-        chunks, embeddings = self._prepare(content)
-        return self.store.replace_document(
+        try:
+            chunks, embeddings = self._prepare(content)
+        except EmbeddingProviderError:
+            logger.warning(
+                "Embedding provider failure while updating document: id=%s title=%r",
+                document_id,
+                title,
+            )
+            raise
+        document = self.store.replace_document(
             document_id,
             title,
             content,
@@ -115,6 +139,10 @@ class RAGService:
             embeddings,
             expected_embedding_identity=self._embedding_identity,
         )
+        logger.info(
+            "Document updated: id=%s title=%r chunk_count=%d", document_id, title, len(chunks)
+        )
+        return document
 
     def search(
         self, query: str, top_k: int = 5, filter_metadata: dict[str, Any] | None = None
@@ -124,12 +152,19 @@ class RAGService:
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
             raise ValueError("top_k must be between 1 and 100")
         self.store.preflight_embedding_configuration(self._embedding_identity)
-        return self.store.search(
-            self.embedder.embed_one(query),
+        try:
+            query_embedding = self.embedder.embed_one(query)
+        except EmbeddingProviderError:
+            logger.warning("Embedding provider failure while searching")
+            raise
+        results = self.store.search(
+            query_embedding,
             top_k,
             filter_metadata,
             expected_embedding_identity=self._embedding_identity,
         )
+        logger.debug("Search executed: top_k=%d result_count=%d", top_k, len(results))
+        return results
 
     def list_documents(self) -> list[dict[str, Any]]:
         return self.store.list_documents()
@@ -142,3 +177,4 @@ class RAGService:
         self.store.delete_document(
             document_id, expected_embedding_identity=self._embedding_identity
         )
+        logger.info("Document deleted: id=%s", document_id)
