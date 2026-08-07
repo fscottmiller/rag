@@ -69,3 +69,27 @@ def test_trusted_proxy_rejects_empty_or_ambiguous_role_configuration():
         )
     with pytest.raises(ValueError, match="header"):
         Authorizer(Settings(auth_mode="trusted-proxy", proxy_user_header=" "))
+
+
+def test_trusted_proxy_strips_surrounding_whitespace_from_header_values():
+    """Proxies may emit header values padded with whitespace.
+
+    Both the identity and the role are stripped before use: an unstripped role
+    would never match the configured value and would lock out a legitimate
+    admin, and an unstripped user would carry the padding into the audit log.
+    """
+    authorizer = Authorizer(
+        Settings(
+            auth_mode="trusted-proxy",
+            proxy_user_header="X-User",
+            proxy_role_header="X-Role",
+            proxy_admin_role="owner",
+            proxy_reader_role="viewer",
+        )
+    )
+
+    principal = authorizer.authorize(
+        {"X-User": "  admin@example.test\t", "X-Role": " owner "}, "write"
+    )
+
+    assert principal == Principal(user="admin@example.test", role="admin")
