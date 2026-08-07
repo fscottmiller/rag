@@ -146,10 +146,64 @@ def test_rest_does_not_leak_provider_detail_but_logs_it(service, caplog):
     assert leaked_detail in logged_text
 
 
-# ---------------------------------------------------------------------------
-# Live-probe reproduction: actual HTTP failures classified through the real
-# OpenAICompatibleEmbedder, not just the REST-layer mapping above.
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("route", ["POST /documents", "PUT /documents/{id}", "POST /search"])
+def test_no_route_leaks_provider_detail_into_the_response(service, route):
+    """Every embedding-triggering route must withhold upstream detail.
+
+    Originally only POST was covered, so mutating the PUT and search handlers
+    to forward str(exc) into the HTTP detail left the whole suite green.
+    """
+    leaked = "acct_secret_beef quota exceeded at internal-upstream.example"
+    body = json.dumps({"error": leaked}).encode()
+    with _local_error_server(500, body) as url:
+        embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
+        failing = RAGService(service.store, embedder, service.chunker, service.settings)
+        client = TestClient(create_app(failing))
+
+        if route == "POST /documents":
+            response = client.post("/documents", json={"title": "D", "content": "python"})
+        elif route == "PUT /documents/{id}":
+            seeded = service.ingest("Seed", "python")
+            response = client.put(
+                f"/documents/{seeded['id']}", json={"title": "D", "content": "python"}
+            )
+        else:
+            response = client.post("/search", json={"query": "python"})
+
+    assert response.status_code == 502
+    assert leaked not in response.text
+    assert "acct_secret_beef" not in response.text
+    assert "internal-upstream.example" not in response.text
+
+
+def test_provider_detail_cannot_forge_a_log_line(service, caplog):
+    """A real newline in provider detail must not produce a second log record.
+
+    The provider response body is attacker-influenced and is NOT parsed as JSON
+    on the HTTP-error path - it is read raw. Interpolated with %s, an embedded
+    newline yields a complete, well-formed fake log line, including a forged
+    authorization grant. %r escapes it to a literal backslash-n.
+    """
+    forged = (
+        b"boom\n2099-01-01 00:00:00 WARNING utralight_rag.auth: "
+        b"FORGED user=admin role=admin action=write"
+    )
+    assert b"\n" in forged, "the probe must carry a real newline, not an escaped one"
+
+    with _local_error_server(500, forged) as url:
+        embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
+        failing = RAGService(service.store, embedder, service.chunker, service.settings)
+        client = TestClient(create_app(failing))
+        with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+            client.post("/documents", json={"title": "D", "content": "python"})
+
+    assert caplog.records, "the provider failure must be logged at all"
+    for record in caplog.records:
+        assert "\n" not in record.getMessage(), (
+            "a raw newline reached the log record, so provider detail can forge log lines"
+        )
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "FORGED" in logged, "detail must still be logged, just escaped"
 
 
 @contextmanager

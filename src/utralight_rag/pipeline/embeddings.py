@@ -311,17 +311,17 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             # provider's raw response body can contain upstream hostnames, quota
             # details, or account identifiers.
             detail = exc.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:500]
-            logger.error("Embedding endpoint %s returned HTTP %s: %s", self.url, exc.code, detail)
+            logger.error("Embedding endpoint %s returned HTTP %s: %r", self.url, exc.code, detail)
             raise EmbeddingProviderResponseError(
                 f"Embedding endpoint returned HTTP {exc.code}: {detail}"
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            logger.warning("Embedding endpoint %s request failed: %s", self.url, exc)
+            logger.warning("Embedding endpoint %s request failed: %r", self.url, exc)
             raise EmbeddingProviderUnavailableError(
                 f"Embedding endpoint request failed: {exc}"
             ) from exc
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            logger.error("Embedding endpoint %s returned invalid JSON: %s", self.url, exc)
+            logger.error("Embedding endpoint %s returned invalid JSON: %r", self.url, exc)
             raise EmbeddingProviderResponseError(
                 "Embedding endpoint returned invalid JSON"
             ) from exc
@@ -357,7 +357,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         try:
             return _validated_embeddings(vectors, len(inputs))
         except RuntimeError as exc:
-            logger.error("Embedding endpoint %s returned invalid embeddings: %s", self.url, exc)
+            logger.error("Embedding endpoint %s returned invalid embeddings: %r", self.url, exc)
             raise EmbeddingProviderResponseError(
                 "Embedding endpoint returned invalid embeddings"
             ) from exc
