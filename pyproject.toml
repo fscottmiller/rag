@@ -26,6 +26,7 @@ dev = [
   "httpx2>=2.9.1",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  "pytest-randomly>=3.15.0",
 ]
 
 [tool.uv]
@@ -56,6 +57,76 @@ precision = 2
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+  "error",
+  # Pre-existing resource leak (not fixed by this PR -- see PR body for details,
+  # out of scope: fix belongs in src/): `_read_document_request` in api/main.py
+  # awaits `request.form()` for multipart uploads but never calls
+  # `await form.close()`, so the backing SpooledTemporaryFile for uploaded
+  # files is only closed when garbage collected. GC then raises a
+  # ResourceWarning from inside `__del__`, which pytest reports as an
+  # "unraisable exception" warning. Ignored narrowly by exact origin so any
+  # *other* unraisable-exception warning still fails the build.
+  "ignore:Exception ignored in. <function SpooledTemporaryFile\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
+  # Third-party: the `mcp` SDK's StreamableHTTP session manager keeps an
+  # anyio MemoryObjectReceiveStream per session, and one is closed by GC
+  # rather than explicitly. Root cause is NOT fully isolated: it is tied to
+  # session *creation*, not teardown -- the leak persists even when the test
+  # sends an explicit session-terminating `DELETE /mcp` (200 OK), and occurs
+  # after a bare `initialize` with no further calls, while a test that opens
+  # no MCP session at all does not leak. Confirmed third-party in origin: the
+  # traceback frames are entirely inside the `mcp` package, not this repo.
+  # Ignored narrowly by exact origin, same rationale as above.
+  "ignore:Exception ignored in. <function MemoryObjectReceiveStream\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
+  # Pre-existing resource leak (not fixed by this PR, tracked as follow-up
+  # work): tests across test_mcp.py, test_service.py, and test_mcp_auth.py
+  # construct `SQLiteStore` directly and never call `.close()`, so the
+  # underlying `sqlite3.Connection` is only released at garbage collection.
+  # GC then raises `ResourceWarning: unclosed database`, which pytest reports
+  # as an "unraisable exception" warning -- surfaced by this zero-warning
+  # enforcement itself, on Python 3.13's GC timing where 3.11/3.12 did not
+  # trigger it. The real fix is to give `SQLiteStore` context-manager support
+  # and/or close stores via a fixture in the test suite; that's out of scope
+  # here (belongs in src/ and tests/). Ignored narrowly by exact origin so
+  # any *other* unraisable-exception warning still fails the build. Remove
+  # this ignore once the leak is fixed.
+  "ignore:Exception ignored in. <sqlite3\\.Connection object at 0x.*:pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.mutmut]
+# Scoped to the highest-risk modules identified by the security review (auth,
+# storage, and the embedding pipeline that handles credentials in URLs) --
+# full-repo mutation testing is too slow to run routinely; see the CI
+# hardening PR body for measured per-module timings. Runs on a schedule /
+# manual trigger only (.github/workflows/mutation.yml), never on push/PR.
+source_paths = ["src"]
+only_mutate = [
+  "src/utralight_rag/auth.py",
+  "src/utralight_rag/storage/sqlite.py",
+  "src/utralight_rag/pipeline/embeddings.py",
+]
+# Restricting to the tests that actually exercise these modules keeps each
+# mutant's test run fast, and (found empirically) avoids a mutmut quirk: it
+# calls pytest.main() multiple times in one long-lived process, so a test
+# like test_mcp.py::test_combined_import_does_not_create_an_unused_rest_app
+# that asserts on fresh-process module state spuriously fails there even
+# though it passes reliably (verified with 8+ full-suite runs, including
+# randomized order) under normal single-invocation pytest/CI.
+# test_service.py is included because it holds the only coverage of
+# pipeline/embeddings.py's credential guard (_has_query_credentials). Omitting
+# it made that guard's mutants look like survivors when they are in fact
+# killed, i.e. the report claimed a credential-handling coverage gap that did
+# not exist. A mutation report that cries wolf stops being read, so any test
+# file that exercises an only_mutate module belongs in this list.
+pytest_add_cli_args_test_selection = [
+  "tests/test_auth.py",
+  "tests/test_mcp_auth.py",
+  "tests/test_storage.py",
+  "tests/test_storage_concurrency.py",
+  "tests/test_embeddings.py",
+  "tests/test_service.py",
+]
 
 [tool.ruff]
 line-length = 100
