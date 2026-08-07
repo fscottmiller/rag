@@ -14,9 +14,22 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import Lifespan
 
 from ..auth import AuthenticationError, AuthorizationError, Authorizer
+from ..pipeline.embeddings import EmbeddingProviderResponseError, EmbeddingProviderUnavailableError
 from ..service import DocumentTooLargeError, RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
+
+# Generic, client-safe messages for embedding-provider failures (finding F12).
+# The real detail -- upstream response bodies, hostnames, quota text -- is
+# logged server-side in pipeline/embeddings.py and must never reach an HTTP
+# response, since it can contain upstream internal hostnames, quota details,
+# or account identifiers. Only EmbeddingProviderUnavailableError and
+# EmbeddingProviderResponseError are caught below; a bare RuntimeError (a
+# genuine bug elsewhere in the service) is deliberately left uncaught here so
+# it still surfaces as an opaque 500, rather than being mislabeled as an
+# upstream failure.
+_PROVIDER_UNAVAILABLE_DETAIL = "Embedding provider is currently unavailable"
+_PROVIDER_RESPONSE_DETAIL = "Embedding provider returned an invalid response"
 
 
 def _same_origin(origin: str, request: Request) -> bool:
@@ -147,6 +160,10 @@ def create_app(
             return await run_in_threadpool(rag.ingest, **payload)
         except DocumentTooLargeError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except EmbeddingProviderUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=_PROVIDER_UNAVAILABLE_DETAIL) from exc
+        except EmbeddingProviderResponseError as exc:
+            raise HTTPException(status_code=502, detail=_PROVIDER_RESPONSE_DETAIL) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -181,6 +198,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="Document not found") from exc
         except DocumentTooLargeError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except EmbeddingProviderUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=_PROVIDER_UNAVAILABLE_DETAIL) from exc
+        except EmbeddingProviderResponseError as exc:
+            raise HTTPException(status_code=502, detail=_PROVIDER_RESPONSE_DETAIL) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -197,6 +218,10 @@ def create_app(
         require(request, "read")
         try:
             return rag.search(payload.query, payload.top_k, payload.filter_metadata)
+        except EmbeddingProviderUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=_PROVIDER_UNAVAILABLE_DETAIL) from exc
+        except EmbeddingProviderResponseError as exc:
+            raise HTTPException(status_code=502, detail=_PROVIDER_RESPONSE_DETAIL) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

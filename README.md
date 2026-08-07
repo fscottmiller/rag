@@ -86,6 +86,12 @@ Available endpoints:
 - `DELETE /documents/{id}` — remove a document and its vectors.
 - `POST /search` — search chunks by embedding similarity.
 
+`POST /documents`, `PUT /documents/{id}`, and `POST /search` all trigger embedding-provider work; if the provider is unreachable or times out they return `503`, and if it is reached but returns something unusable (an error status, malformed JSON, or the wrong shape) they return `502`. Neither response includes the provider's raw response body, endpoint URL, or anything derived from the API key -- that detail is logged server-side only. A genuine bug elsewhere in the service still surfaces as an opaque `500`, exactly as before.
+
+## Logging
+
+The library uses the standard `logging` module (`logging.getLogger(__name__)` per module) and never configures handlers, levels, or `logging.basicConfig` itself -- that is the embedding application's responsibility. At minimum it logs, server-side only: embedding-provider failures (with upstream detail, truncated to 500 bytes, at `WARNING`/`ERROR`); authorization denials in `trusted-proxy` mode, identified by principal and attempted action; document ingest/update/delete, identified by document id; and search, identified by `top_k` and result count (a search is not scoped to one document, so no id applies). It never logs the embedding API key, document content, or chunk text -- `Settings.embedding_api_key` is `repr=False` for the same reason.
+
 ## MCP
 
 The combined entry point serves REST and streamable HTTP MCP from one process and one `RAGService`:
@@ -111,7 +117,7 @@ curl -X PUT -F 'file=@/path/to/google-sre-book.md' http://127.0.0.1:8001/documen
 
 When a multipart or form update omits `title`, the title is (re)derived from the uploaded filename, the same as on create — pass `title` explicitly in the form fields if the update should keep the document's existing title.
 
-The indexed documents are then available through `rag_search`, `list_documents`, and `get_document`. Available tools are `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`.
+The indexed documents are then available through `rag_search`, `list_documents`, and `get_document`. Available tools are `rag_search`, `list_documents`, `get_document`, `upload_document`, and `delete_document`. `rag_search` and `upload_document` report embedding-provider failures the same way authorization denials are already reported: a `CallToolResult` with `isError: true` and a machine-readable `_meta.error_type` (`embedding_provider_unavailable` or `embedding_provider_error`), never the provider's raw response detail.
 
 Run the MCP server over stdio (the default) when a client should spawn it directly; this mode remains a separate process:
 
