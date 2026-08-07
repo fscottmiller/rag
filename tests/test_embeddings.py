@@ -12,6 +12,7 @@ import pytest
 from utralight_rag.pipeline import embeddings as embeddings_module
 from utralight_rag.pipeline.embeddings import (
     BaseEmbedder,
+    EmbeddingProviderResponseError,
     FastEmbedEmbedder,
     OpenAICompatibleEmbedder,
     SentenceTransformerEmbedder,
@@ -93,7 +94,9 @@ def test_fastembed_rejects_malformed_vectors(monkeypatch, vectors):
             return (Vector(vector) for vector in vectors)
 
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
-    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+    with pytest.raises(
+        EmbeddingProviderResponseError, match="FastEmbed returned invalid embeddings"
+    ):
         FastEmbedEmbedder("test-model").embed(["one"])
 
 
@@ -106,7 +109,9 @@ def test_fastembed_rejects_vectors_without_tolist(monkeypatch):
             return [object()]
 
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
-    with pytest.raises(RuntimeError, match="FastEmbed returned invalid embeddings"):
+    with pytest.raises(
+        EmbeddingProviderResponseError, match="FastEmbed returned invalid embeddings"
+    ):
         FastEmbedEmbedder("test-model").embed(["one"])
 
 
@@ -259,7 +264,7 @@ def test_openai_compatible_embedder_sends_batch_and_preserves_indexes():
             )
         too_large = OpenAICompatibleEmbedder("model", f"{base_url}/too-large", provider="ollama")
         too_large.max_response_bytes = 3
-        with pytest.raises(RuntimeError, match="exceeds size limit"):
+        with pytest.raises(EmbeddingProviderResponseError, match="exceeds size limit"):
             too_large.embed(["one"])
         with pytest.raises(RuntimeError, match="invalid JSON"):
             OpenAICompatibleEmbedder("model", f"{base_url}/invalid-json", provider="ollama").embed(
@@ -472,3 +477,26 @@ def test_openai_compatible_embedder_rejects_bare_json_non_finite_tokens(token):
         embedder = OpenAICompatibleEmbedder("model", url, provider="ollama")
         with pytest.raises(RuntimeError, match="invalid embeddings"):
             embedder.embed(["one"])
+
+
+def test_sentence_transformer_classifies_bad_output_as_response_error(monkeypatch):
+    """The SentenceTransformers error path had zero coverage.
+
+    It must classify as a *response* error (502), not unavailable (503): the
+    model produced output, it was just unusable. Reclassifying it previously
+    survived the whole suite.
+    """
+
+    class Model:
+        def encode(self, inputs, convert_to_numpy=True):
+            raise ValueError("model produced garbage")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=lambda name: Model()),
+    )
+    with pytest.raises(
+        EmbeddingProviderResponseError, match="SentenceTransformers returned invalid embeddings"
+    ):
+        SentenceTransformerEmbedder("test-model").embed(["one"])

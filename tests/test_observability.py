@@ -382,3 +382,27 @@ def test_service_logs_authorization_denials_with_principal_and_action(service, c
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert "mallory@example.test" in log_text
     assert "write" in log_text
+
+
+def test_auth_logs_missing_trusted_proxy_identity(service, caplog):
+    """The 'no identity' denial log had line coverage but no behavior test.
+
+    Deleting the logger.warning call previously left the suite green, so the
+    audit trail could lose unauthenticated attempts silently.
+    """
+    from dataclasses import replace
+
+    protected = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, auth_mode="trusted-proxy"),
+    )
+    client = TestClient(create_app(protected))
+
+    with caplog.at_level(logging.WARNING, logger="utralight_rag"):
+        response = client.get("/documents")
+
+    assert response.status_code == 401
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "identity" in logged.lower(), f"missing-identity denial not logged: {logged!r}"

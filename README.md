@@ -90,7 +90,7 @@ Available endpoints:
 
 ## Logging
 
-The library uses the standard `logging` module (`logging.getLogger(__name__)` per module) and never configures handlers, levels, or `logging.basicConfig` itself -- that is the embedding application's responsibility. At minimum it logs, server-side only: embedding-provider failures (with full upstream detail, at `WARNING`/`ERROR`); authorization denials in `trusted-proxy` mode, identified by principal and attempted action; and document ingest/update/delete/search, identified by document id. It never logs the embedding API key, document content, or chunk text -- `Settings.embedding_api_key` is `repr=False` for the same reason.
+The library uses the standard `logging` module (`logging.getLogger(__name__)` per module) and never configures handlers, levels, or `logging.basicConfig` itself -- that is the embedding application's responsibility. At minimum it logs, server-side only: embedding-provider failures (with upstream detail, truncated to 500 bytes, at `WARNING`/`ERROR`); authorization denials in `trusted-proxy` mode, identified by principal and attempted action; document ingest/update/delete, identified by document id; and search, identified by `top_k` and result count (a search is not scoped to one document, so no id applies). It never logs the embedding API key, document content, or chunk text -- `Settings.embedding_api_key` is `repr=False` for the same reason.
 
 ## MCP
 
