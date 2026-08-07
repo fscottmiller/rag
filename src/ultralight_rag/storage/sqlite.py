@@ -179,8 +179,7 @@ class SQLiteStore:
             )
             if chunks:
                 chunk_data = [
-                    (document_id, ordinal, text, "{}")
-                    for ordinal, text in enumerate(chunks)
+                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
                 ]
                 self.connection.executemany(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
@@ -188,9 +187,10 @@ class SQLiteStore:
                 )
 
                 chunk_ids = [
-                    row[0] for row in self.connection.execute(
+                    row[0]
+                    for row in self.connection.execute(
                         "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
-                        (document_id,)
+                        (document_id,),
                     )
                 ]
 
@@ -370,8 +370,7 @@ class SQLiteStore:
             )
             if chunks:
                 chunk_data = [
-                    (document_id, ordinal, text, "{}")
-                    for ordinal, text in enumerate(chunks)
+                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
                 ]
                 self.connection.executemany(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
@@ -379,9 +378,10 @@ class SQLiteStore:
                 )
 
                 chunk_ids = [
-                    row[0] for row in self.connection.execute(
+                    row[0]
+                    for row in self.connection.execute(
                         "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
-                        (document_id,)
+                        (document_id,),
                     )
                 ]
 
