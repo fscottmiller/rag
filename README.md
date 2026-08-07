@@ -181,6 +181,18 @@ uv run coverage run -m pytest
 uv run coverage report
 ```
 
-The suite fails if total branch-aware coverage drops below 95%, measured to two decimal places (`fail_under = 95`, `precision = 2` in `pyproject.toml`). GitHub Actions runs it automatically on every push and pull request against Python 3.11, 3.12, and 3.13.
+The suite fails if total branch-aware coverage drops below 95%, measured to two decimal places (`fail_under = 95`, `precision = 2` in `pyproject.toml`). It also fails on any warning pytest doesn't already know about (`filterwarnings = ["error", ...]` in `pyproject.toml`, with a small number of narrowly-scoped, individually-commented ignores for known pre-existing issues) and runs tests in a random order each time (`pytest-randomly`) to surface hidden ordering dependencies between tests.
+
+GitHub Actions runs the following on every push and pull request, in parallel jobs so a slow check never blocks the others (see `.github/workflows/tests.yml`):
+
+| Job | What it checks |
+| --- | --- |
+| `test` | Tests + coverage gate, matrixed across Python 3.11, 3.12, 3.13. |
+| `lint` | `ruff check` and `ruff format --check`. |
+| `lockfile` | `uv lock --check` -- fails if `uv.lock` is out of sync with `pyproject.toml`. |
+| `dependency-audit` | `pip-audit` against the resolved dependency set -- fails on known CVEs in any dependency, direct or transitive. |
+| `build-and-import` | Builds the wheel, installs *that artifact* into a clean virtualenv, and imports it -- catches packaging mistakes that `uv sync`'s editable install would never see. |
+
+A separate weekly/manual-only workflow (`.github/workflows/mutation.yml`) runs mutation testing (`mutmut`) against the highest-risk modules (`auth.py`, `storage/sqlite.py`, `pipeline/embeddings.py`) to check whether the test suite would actually notice if their logic were broken, not just executed. It's report-only and scoped to these three files because a full-repo run is too slow for routine use.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions and trade-offs.
