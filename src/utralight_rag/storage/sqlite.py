@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from functools import wraps
 from numbers import Real
+from types import TracebackType
 from typing import Any, TypeVar
 
 import sqlite_vec
@@ -446,4 +447,20 @@ class SQLiteStore:
 
     @_synchronized
     def close(self) -> None:
+        """Release the underlying sqlite3 connection.
+
+        Safe to call more than once: `sqlite3.Connection.close()` is itself
+        idempotent, so a second call here is a no-op rather than an error.
+        """
         self.connection.close()
+
+    def __enter__(self) -> SQLiteStore:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
