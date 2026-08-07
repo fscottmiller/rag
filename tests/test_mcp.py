@@ -5,7 +5,11 @@ from fastapi.testclient import TestClient
 from mcp.server.fastmcp.exceptions import ToolError
 
 from ultralight_rag.combined import create_combined_app
-from ultralight_rag.mcp_server.server import create_mcp, get_transport
+from ultralight_rag.mcp_server.server import _provider_failure, create_mcp, get_transport
+from ultralight_rag.pipeline.embeddings import (
+    EmbeddingProviderError,
+    EmbeddingProviderUnavailableError,
+)
 from ultralight_rag.service import RAGService
 
 
@@ -267,3 +271,27 @@ def test_mcp_rejects_cross_origin_for_wildcard_host(service, origin):
             "/mcp", json={}, headers={"accept": "application/json", "origin": origin}
         )
     assert response.status_code == 403
+
+
+def test_provider_failure_mapping():
+    denied_content = {"result": []}
+
+    # Test unavailable error
+    exc = EmbeddingProviderUnavailableError("Provider is down")
+    result = _provider_failure(exc, denied_content=denied_content)
+
+    assert result.isError is True
+    assert result.structuredContent == denied_content
+    meta = getattr(result, "meta", getattr(result, "_meta", None))
+    assert meta == {"error_type": "embedding_provider_unavailable"}
+    assert result.content[0].text == "The embedding provider is currently unavailable."
+
+    # Test generic error
+    exc2 = EmbeddingProviderError("Invalid response")
+    result2 = _provider_failure(exc2, denied_content=denied_content)
+
+    assert result2.isError is True
+    assert result2.structuredContent == denied_content
+    meta2 = getattr(result2, "meta", getattr(result2, "_meta", None))
+    assert meta2 == {"error_type": "embedding_provider_error"}
+    assert result2.content[0].text == "The embedding provider returned an invalid response."

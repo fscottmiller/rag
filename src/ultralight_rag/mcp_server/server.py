@@ -70,6 +70,28 @@ def get_transport() -> str:
     return transport
 
 
+def _provider_failure(
+    exc: EmbeddingProviderError, *, denied_content: dict[str, Any]
+) -> CallToolResult:
+    """Map an embedding-provider failure to a structured result, matching the
+    `authorize()` pattern above: `_meta.error_type` carries the machine-readable
+    reason and `content` carries a generic, client-safe message. The real
+    detail (upstream response bodies, hostnames, quota text) is logged
+    server-side in pipeline/embeddings.py, not forwarded here -- see F12/section C."""
+    if isinstance(exc, EmbeddingProviderUnavailableError):
+        error_type = "embedding_provider_unavailable"
+        message = "The embedding provider is currently unavailable."
+    else:
+        error_type = "embedding_provider_error"
+        message = "The embedding provider returned an invalid response."
+    return CallToolResult(
+        content=[TextContent(type="text", text=message)],
+        isError=True,
+        structuredContent=denied_content,
+        _meta={"error_type": error_type},
+    )
+
+
 def create_mcp(
     service: RAGService | None = None,
     *,
@@ -131,27 +153,6 @@ def create_mcp(
             )
         return None
 
-    def provider_failure(
-        exc: EmbeddingProviderError, *, denied_content: dict[str, Any]
-    ) -> CallToolResult:
-        """Map an embedding-provider failure to a structured result, matching the
-        `authorize()` pattern above: `_meta.error_type` carries the machine-readable
-        reason and `content` carries a generic, client-safe message. The real
-        detail (upstream response bodies, hostnames, quota text) is logged
-        server-side in pipeline/embeddings.py, not forwarded here -- see F12/section C."""
-        if isinstance(exc, EmbeddingProviderUnavailableError):
-            error_type = "embedding_provider_unavailable"
-            message = "The embedding provider is currently unavailable."
-        else:
-            error_type = "embedding_provider_error"
-            message = "The embedding provider returned an invalid response."
-        return CallToolResult(
-            content=[TextContent(type="text", text=message)],
-            isError=True,
-            structuredContent=denied_content,
-            _meta={"error_type": error_type},
-        )
-
     @server.tool()
     async def rag_search(
         query: str,
@@ -166,7 +167,7 @@ def create_mcp(
         try:
             return await anyio.to_thread.run_sync(rag.search, query, top_k, filter_metadata)
         except EmbeddingProviderError as exc:
-            return provider_failure(exc, denied_content={"result": []})
+            return _provider_failure(exc, denied_content={"result": []})
 
     @server.tool()
     async def list_documents(*, ctx: Context) -> SearchResult:
@@ -199,7 +200,7 @@ def create_mcp(
         try:
             return await anyio.to_thread.run_sync(rag.ingest, title, content, metadata)
         except EmbeddingProviderError as exc:
-            return provider_failure(exc, denied_content={})
+            return _provider_failure(exc, denied_content={})
 
     @server.tool()
     async def delete_document(document_id: str, *, ctx: Context) -> DeleteResult:
