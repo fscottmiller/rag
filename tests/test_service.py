@@ -347,13 +347,13 @@ def test_equivalent_provider_aliases_and_endpoint_settings_share_identity(tmp_pa
 
 
 def test_embedding_endpoint_rejects_embedded_credentials():
-    for url in (
-        "https://user:password@embedding.example/v1/embeddings",
-        "https://embedding.example/v1/embeddings?api_key=secret",
-        "https://embedding.example/v1/embeddings?accessToken=secret",
-    ):
-        with pytest.raises(ValueError, match="credentials"):
-            OpenAICompatibleEmbedder("model", url, "api-secret")
+    # The query-string cases ("api_key", "accessToken") are strict subsets of
+    # the per-arm parametrized suffix tests below; only the userinfo
+    # (user:password@) case is unique to this test, so it is kept on its own.
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleEmbedder(
+            "model", "https://user:password@embedding.example/v1/embeddings", "api-secret"
+        )
 
 
 @pytest.mark.parametrize("name", ["auth", "authorization", "sig"])
@@ -388,11 +388,43 @@ def test_embedding_endpoint_rejects_every_credential_suffix(name):
         OpenAICompatibleEmbedder("model", url, "api-secret")
 
 
-@pytest.mark.parametrize("name", ["API-KEY", "api_key", "Api.Key"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "API-KEY",
+        "api_key",
+        "Api.Key",
+        "api_key_",
+        "api.key!",
+    ],
+)
 def test_embedding_endpoint_normalizes_parameter_names_before_matching(name):
     # The predicate strips non-alphanumeric characters and lowercases before
     # comparing, so differently-punctuated/cased spellings of the same
     # logical parameter name must all be treated identically.
+    #
+    # "api_key_" and "api.key!" specifically pin the isalnum() stripping
+    # half of that claim (not just the lowercasing half): their punctuation
+    # lands *after* the "key" suffix, so `name.lower()` alone would end with
+    # "_" / "!" rather than "key" and the suffix arm would stop matching. The
+    # other three cases only place punctuation *before* the suffix, where
+    # `.lower().endswith(...)` already matches without any stripping -- so
+    # they cannot, by themselves, prove the isalnum() filter is load-bearing.
+    url = f"https://embedding.example/v1/embeddings?{name}=secret"
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleEmbedder("model", url, "api-secret")
+
+
+@pytest.mark.parametrize("name", ["si-g", "a.u.t.h"])
+def test_embedding_endpoint_normalizes_membership_parameter_names_before_matching(name):
+    # The set-membership arm (`in {"auth", "authorization", "sig"}`) is
+    # compared against the same stripped/lowercased name. "si-g" and
+    # "a.u.t.h" have punctuation embedded *within* the matched substring, so
+    # they only normalize into the membership set once isalnum() stripping
+    # is applied: `name.lower()` alone leaves "si-g" and "a.u.t.h", neither
+    # of which is a member. This pins the isalnum() half of the
+    # normalization claim for the membership arm, mirroring the suffix-arm
+    # cases above.
     url = f"https://embedding.example/v1/embeddings?{name}=secret"
     with pytest.raises(ValueError, match="credentials"):
         OpenAICompatibleEmbedder("model", url, "api-secret")
