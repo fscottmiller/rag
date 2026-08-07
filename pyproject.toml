@@ -79,19 +79,6 @@ filterwarnings = [
   # traceback frames are entirely inside the `mcp` package, not this repo.
   # Ignored narrowly by exact origin, same rationale as above.
   "ignore:Exception ignored in. <function MemoryObjectReceiveStream\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
-  # Pre-existing resource leak (not fixed by this PR, tracked as follow-up
-  # work): tests across test_mcp.py, test_service.py, and test_mcp_auth.py
-  # construct `SQLiteStore` directly and never call `.close()`, so the
-  # underlying `sqlite3.Connection` is only released at garbage collection.
-  # GC then raises `ResourceWarning: unclosed database`, which pytest reports
-  # as an "unraisable exception" warning -- surfaced by this zero-warning
-  # enforcement itself, on Python 3.13's GC timing where 3.11/3.12 did not
-  # trigger it. The real fix is to give `SQLiteStore` context-manager support
-  # and/or close stores via a fixture in the test suite; that's out of scope
-  # here (belongs in src/ and tests/). Ignored narrowly by exact origin so
-  # any *other* unraisable-exception warning still fails the build. Remove
-  # this ignore once the leak is fixed.
-  "ignore:Exception ignored in. <sqlite3\\.Connection object at 0x.*:pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.mutmut]
