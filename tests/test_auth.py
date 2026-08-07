@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from ultralight_rag.auth import AuthenticationError, AuthorizationError, Authorizer, Principal
@@ -116,3 +118,22 @@ def test_auth_mode_is_normalized_for_case_and_underscores(configured, expected):
     dropping `.lower()` or `.replace("_", "-")` each left all 161 tests green.
     """
     assert Authorizer(Settings(auth_mode=configured)).mode == expected
+
+
+def test_trusted_proxy_escapes_control_characters_in_log(caplog):
+    caplog.set_level(logging.WARNING)
+    authorizer = Authorizer(
+        Settings(
+            auth_mode="trusted-proxy",
+            proxy_user_header="X-User",
+            proxy_role_header="X-Role",
+            proxy_admin_role="owner",
+            proxy_reader_role="viewer",
+        )
+    )
+    with pytest.raises(AuthorizationError):
+        # Using a payload with newline, carriage return, and ANSI escape
+        authorizer.authorize({"X-User": "hacker\n\r\x1b", "X-Role": "viewer"}, "write")
+
+    expected_log = "Authorization denied: user=hacker\\x0a\\x0d\\x1b role=viewer action=write"
+    assert expected_log in caplog.text
