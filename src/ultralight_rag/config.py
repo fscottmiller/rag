@@ -2,6 +2,47 @@
 
 import os
 from dataclasses import dataclass, field
+from typing import TypedDict
+
+
+class ProviderConfig(TypedDict):
+    model: str
+    url: str
+    uses_openai_key: bool
+
+
+PROVIDER_DEFAULTS: dict[str, ProviderConfig] = {
+    "openai": {
+        "model": "text-embedding-3-small",
+        "url": "https://api.openai.com/v1/embeddings",
+        "uses_openai_key": True,
+    },
+    "openai-compatible": {
+        "model": "text-embedding-3-small",
+        "url": "https://api.openai.com/v1/embeddings",
+        "uses_openai_key": True,
+    },
+    "openai-compatible-api": {
+        "model": "text-embedding-3-small",
+        "url": "https://api.openai.com/v1/embeddings",
+        "uses_openai_key": True,
+    },
+    "ollama": {
+        "model": "nomic-embed-text",
+        "url": "http://localhost:11434/v1/embeddings",
+        "uses_openai_key": False,
+    },
+    "fastembed": {
+        "model": "BAAI/bge-small-en-v1.5",
+        "url": "https://api.openai.com/v1/embeddings",
+        "uses_openai_key": False,
+    },
+    "default": {
+        "model": "all-MiniLM-L6-v2",
+        "url": "https://api.openai.com/v1/embeddings",
+        "uses_openai_key": False,
+    },
+}
 
 DEFAULT_MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 DEFAULT_MAX_REQUEST_BYTES = DEFAULT_MAX_DOCUMENT_BYTES + 64 * 1024
@@ -45,32 +86,26 @@ class Settings:
     def from_env(cls) -> "Settings":
         provider = os.getenv("RAG_EMBEDDING_PROVIDER")
         configured_api_key = os.getenv("RAG_EMBEDDING_API_KEY", "").strip()
+
         if provider is None:
             api_key = configured_api_key or os.getenv("OPENAI_API_KEY", "").strip()
             provider = "openai-compatible" if api_key else "fastembed"
         else:
             normalized_explicit_provider = provider.lower().replace("_", "-")
+            provider_config = PROVIDER_DEFAULTS.get(
+                normalized_explicit_provider, PROVIDER_DEFAULTS["default"]
+            )
             api_key = configured_api_key or (
                 os.getenv("OPENAI_API_KEY", "").strip()
-                if normalized_explicit_provider
-                in {"openai", "openai-compatible", "openai-compatible-api"}
+                if provider_config["uses_openai_key"]
                 else ""
             )
+
         normalized_provider = provider.lower().replace("_", "-")
-        default_model = (
-            "text-embedding-3-small"
-            if normalized_provider in {"openai", "openai-compatible", "openai-compatible-api"}
-            else "nomic-embed-text"
-            if normalized_provider == "ollama"
-            else "BAAI/bge-small-en-v1.5"
-            if normalized_provider == "fastembed"
-            else "all-MiniLM-L6-v2"
-        )
-        default_url = (
-            "http://localhost:11434/v1/embeddings"
-            if normalized_provider == "ollama"
-            else "https://api.openai.com/v1/embeddings"
-        )
+        provider_config = PROVIDER_DEFAULTS.get(normalized_provider, PROVIDER_DEFAULTS["default"])
+        default_model = provider_config["model"]
+        default_url = provider_config["url"]
+
         return cls(
             database_path=os.getenv("RAG_DATABASE_PATH", ":memory:"),
             embedding_provider=provider,

@@ -62,12 +62,21 @@ class Authorizer:
             return Principal(user=user, role="reader")
         # user and role come straight from HTTP headers (see _header(), which only
         # strips whitespace) with no trust boundary in between, so an attacker fully
-        # controls their content. %r escapes an embedded newline instead of letting it
-        # forge a second, well-formed log line in the authorization audit trail --
+        # controls their content. We explicitly escape all control characters instead
+        # of relying on %r to prevent log forging and downstream parser exploitation.
         # action is an internal literal ("read"/"write"), not attacker data, so %s is
         # fine for it.
-        logger.warning("Authorization denied: user=%r role=%r action=%s", user, role, action)
+        safe_user = self._escape(user)
+        safe_role = self._escape(role)
+        logger.warning(
+            "Authorization denied: user=%s role=%s action=%s", safe_user, safe_role, action
+        )
         raise AuthorizationError("This role is not allowed to perform this action")
+
+    @staticmethod
+    def _escape(val: str) -> str:
+        """Escape control and non-printable characters for safe logging."""
+        return "".join(c if c.isprintable() else rf"\x{ord(c):02x}" for c in val)
 
     @staticmethod
     def _header(headers: Mapping[str, str], name: str) -> str:

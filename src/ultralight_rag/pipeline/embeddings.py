@@ -31,7 +31,7 @@ class EmbeddingProviderError(RuntimeError):
     already do ``pytest.raises(RuntimeError, match=...)`` keep passing
     unchanged, while giving the API/MCP adapters a specific type to catch
     instead of bare ``RuntimeError`` -- which would risk mislabeling genuine
-    bugs elsewhere in the service as upstream failures. Callers should not
+    issues elsewhere in the service as upstream failures. Callers should not
     raise this class directly; raise one of the two subclasses below so the
     adapters can map the failure to an accurate status code / error type.
     """
@@ -302,6 +302,10 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             headers=headers,
             method="POST",
         )
+        body = self._execute_request(request)
+        return self._validate_response(body, len(inputs))
+
+    def _execute_request(self, request: urllib.request.Request) -> Any:
         try:
             with _opener.open(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
@@ -310,7 +314,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
                     raise EmbeddingProviderResponseError(
                         "Embedding endpoint response exceeds size limit"
                     )
-                body = json.loads(raw)
+                return json.loads(raw)
         except urllib.error.HTTPError as exc:
             # Logged here, in full, for operators. The exception message below also
             # carries this detail (existing tests assert on it via
@@ -334,12 +338,13 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
                 "Embedding endpoint returned invalid JSON"
             ) from exc
 
+    def _validate_response(self, body: Any, inputs_count: int) -> list[list[float]]:
         data = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(data, list) or len(data) != len(inputs):
+        if not isinstance(data, list) or len(data) != inputs_count:
             logger.error(
                 "Embedding endpoint %s returned an unexpected data count (expected %d)",
                 self.url,
-                len(inputs),
+                inputs_count,
             )
             raise EmbeddingProviderResponseError(
                 "Embedding endpoint returned an unexpected data count"
@@ -351,7 +356,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         if any(isinstance(index, bool) or not isinstance(index, int) for index in indexes):
             logger.error("Embedding endpoint %s returned non-integer embedding indexes", self.url)
             raise EmbeddingProviderResponseError("Embedding endpoint returned invalid embeddings")
-        if set(indexes) != set(range(len(inputs))):
+        if set(indexes) != set(range(inputs_count)):
             logger.error("Embedding endpoint %s returned mismatched embedding indexes", self.url)
             raise EmbeddingProviderResponseError("Embedding endpoint returned invalid embeddings")
         data = sorted(data, key=lambda item: item["index"])
@@ -363,7 +368,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
                 "Embedding endpoint returned invalid embeddings"
             ) from exc
         try:
-            return _validated_embeddings(vectors, len(inputs))
+            return _validated_embeddings(vectors, inputs_count)
         except RuntimeError as exc:
             logger.error("Embedding endpoint %s returned invalid embeddings: %r", self.url, exc)
             raise EmbeddingProviderResponseError(

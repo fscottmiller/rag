@@ -177,17 +177,33 @@ class SQLiteStore:
                 "(id,title,content,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?)",
                 (document_id, title, content, self._metadata(metadata), now, now),
             )
-            # strict=True documents (and enforces) an invariant already guaranteed by
-            # _validate_embeddings above, which raises ValueError on a length mismatch
-            # before this loop ever runs.
-            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings, strict=True)):
-                cursor = self.connection.execute(
+            if chunks:
+                chunk_data = [
+                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
+                ]
+                self.connection.executemany(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
-                    (document_id, ordinal, text, "{}"),
+                    chunk_data,
                 )
-                self.connection.execute(
+
+                chunk_ids = [
+                    row[0]
+                    for row in self.connection.execute(
+                        "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
+                        (document_id,),
+                    )
+                ]
+
+                # strict=True documents (and enforces) an invariant already guaranteed by
+                # _validate_embeddings above, which raises ValueError on a length mismatch
+                # before this block ever runs.
+                vec_data = [
+                    (chunk_id, sqlite_vec.serialize_float32(vector))
+                    for chunk_id, vector in zip(chunk_ids, embeddings, strict=True)
+                ]
+                self.connection.executemany(
                     "INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?,?)",
-                    (cursor.lastrowid, sqlite_vec.serialize_float32(vector)),
+                    vec_data,
                 )
         return self.get_document(document_id)
 
@@ -352,17 +368,33 @@ class SQLiteStore:
                 "UPDATE documents SET title=?, content=?, metadata=?, updated_at=? WHERE id=?",
                 (title, content, self._metadata(metadata), self._now(), document_id),
             )
-            # strict=True documents (and enforces) an invariant already guaranteed by
-            # _validate_embeddings above, which raises ValueError on a length mismatch
-            # before this loop ever runs.
-            for ordinal, (text, vector) in enumerate(zip(chunks, embeddings, strict=True)):
-                cursor = self.connection.execute(
+            if chunks:
+                chunk_data = [
+                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
+                ]
+                self.connection.executemany(
                     "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
-                    (document_id, ordinal, text, "{}"),
+                    chunk_data,
                 )
-                self.connection.execute(
+
+                chunk_ids = [
+                    row[0]
+                    for row in self.connection.execute(
+                        "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
+                        (document_id,),
+                    )
+                ]
+
+                # strict=True documents (and enforces) an invariant already guaranteed by
+                # _validate_embeddings above, which raises ValueError on a length mismatch
+                # before this block ever runs.
+                vec_data = [
+                    (chunk_id, sqlite_vec.serialize_float32(vector))
+                    for chunk_id, vector in zip(chunk_ids, embeddings, strict=True)
+                ]
+                self.connection.executemany(
                     "INSERT INTO vec_chunks (chunk_id,embedding) VALUES (?,?)",
-                    (cursor.lastrowid, sqlite_vec.serialize_float32(vector)),
+                    vec_data,
                 )
         return self.get_document(document_id)
 

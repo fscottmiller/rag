@@ -1,7 +1,11 @@
 import pytest
 
 from ultralight_rag.config import Settings
-from ultralight_rag.pipeline.embeddings import FastEmbedEmbedder, OpenAICompatibleEmbedder
+from ultralight_rag.pipeline.embeddings import (
+    EmbeddingProviderError,
+    FastEmbedEmbedder,
+    OpenAICompatibleEmbedder,
+)
 from ultralight_rag.service import DocumentTooLargeError, RAGService
 from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
@@ -459,6 +463,18 @@ def test_embedding_endpoint_keeps_non_secret_query_parameters_in_identity(tmp_pa
             ),
             object(),
         )
+
+
+def test_embedding_provider_error_propagation(service, caplog):
+    class ErrorEmbedder:
+        def embed(self, texts):
+            raise EmbeddingProviderError("mock error")
+
+    service.embedder = ErrorEmbedder()
+    with pytest.raises(EmbeddingProviderError, match="mock error"):
+        service.ingest("Error doc", "content")
+
+    assert "Embedding provider failure while ingesting document 'Error doc'" in caplog.text
 
 
 def test_external_endpoint_or_dimensions_change_index_identity(tmp_path):

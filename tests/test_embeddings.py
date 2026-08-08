@@ -337,9 +337,9 @@ def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
         calls.append((request, timeout))
         raise urllib.error.HTTPError("http://embedding.test", 503, "Unavailable", {}, ErrorBody())
 
-    # The embedder issues requests through the module's no-redirect opener (see F1
-    # fix), not urllib.request.urlopen directly, so that is what must be patched for
-    # this test to actually exercise the code path it claims to.
+    # The embedder issues requests through the module's no-redirect opener (see regression
+    # test for F1), not urllib.request.urlopen directly, so that is what must be patched
+    # for this test to actually exercise the code path it claims to.
     monkeypatch.setattr(embeddings_module._opener, "open", fake_open)
     embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
     embedder.max_response_bytes = 3
