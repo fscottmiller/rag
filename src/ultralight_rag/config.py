@@ -4,10 +4,12 @@ import os
 from dataclasses import dataclass, field
 from typing import TypedDict
 
+
 class ProviderConfig(TypedDict):
     model: str
     url: str
     uses_openai_key: bool
+
 
 PROVIDER_DEFAULTS: dict[str, ProviderConfig] = {
     "openai": {
@@ -90,9 +92,13 @@ class Settings:
             provider = "openai-compatible" if api_key else "fastembed"
         else:
             normalized_explicit_provider = provider.lower().replace("_", "-")
-            provider_config = PROVIDER_DEFAULTS.get(normalized_explicit_provider, PROVIDER_DEFAULTS["default"])
+            provider_config = PROVIDER_DEFAULTS.get(
+                normalized_explicit_provider, PROVIDER_DEFAULTS["default"]
+            )
             api_key = configured_api_key or (
-                os.getenv("OPENAI_API_KEY", "").strip() if provider_config["uses_openai_key"] else ""
+                os.getenv("OPENAI_API_KEY", "").strip()
+                if provider_config["uses_openai_key"]
+                else ""
             )
 
         normalized_provider = provider.lower().replace("_", "-")
