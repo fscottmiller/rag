@@ -31,7 +31,7 @@ class EmbeddingProviderError(RuntimeError):
     already do ``pytest.raises(RuntimeError, match=...)`` keep passing
     unchanged, while giving the API/MCP adapters a specific type to catch
     instead of bare ``RuntimeError`` -- which would risk mislabeling genuine
-    bugs elsewhere in the service as upstream failures. Callers should not
+    issues elsewhere in the service as upstream failures. Callers should not
     raise this class directly; raise one of the two subclasses below so the
     adapters can map the failure to an accurate status code / error type.
     """
