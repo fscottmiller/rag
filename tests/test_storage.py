@@ -1,4 +1,5 @@
 import sqlite3
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -7,6 +8,50 @@ from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 def vector_rows(store: SQLiteStore) -> int:
     return store.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+
+
+def test_create_schema_ignores_duplicate_column_error():
+    with patch("sqlite3.connect") as mock_connect:
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+
+        def mock_execute(query, *args, **kwargs):
+            if "PRAGMA table_info(index_metadata)" in query:
+                return [(0, "id", "INTEGER", 0, None, 1)]
+            elif "ALTER TABLE index_metadata ADD COLUMN embedding_fingerprint TEXT" in query:
+                raise sqlite3.OperationalError("duplicate column name: embedding_fingerprint")
+            elif "SELECT sql FROM sqlite_master" in query:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None
+                return mock_cursor
+            return MagicMock()
+
+        mock_conn.execute.side_effect = mock_execute
+
+        # This should succeed without raising OperationalError
+        SQLiteStore()
+
+
+def test_create_schema_reraises_other_operational_errors():
+    with patch("sqlite3.connect") as mock_connect:
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+
+        def mock_execute(query, *args, **kwargs):
+            if "PRAGMA table_info(index_metadata)" in query:
+                return [(0, "id", "INTEGER", 0, None, 1)]
+            elif "ALTER TABLE index_metadata ADD COLUMN embedding_fingerprint TEXT" in query:
+                raise sqlite3.OperationalError("some other error")
+            elif "SELECT sql FROM sqlite_master" in query:
+                mock_cursor = MagicMock()
+                mock_cursor.fetchone.return_value = None
+                return mock_cursor
+            return MagicMock()
+
+        mock_conn.execute.side_effect = mock_execute
+
+        with pytest.raises(sqlite3.OperationalError, match="some other error"):
+            SQLiteStore()
 
 
 def test_storage_round_trip_and_chunk_metadata():
