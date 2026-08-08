@@ -82,13 +82,9 @@ def create_mcp(
         "ultralight-rag",
         host=os.getenv("MCP_HOST", "127.0.0.1"),
         port=int(os.getenv("MCP_PORT", "8000")),
-        # mypy does not narrow `str | None or str` down to plain `str` here (it
-        # keeps `None` in the join even though `None` is always falsy and thus
-        # can never survive `or`) -- a known imprecision in its truthiness
-        # narrowing for `or`-fallback expressions, not a real bug: the `or`
-        # guarantees a `str` at runtime, and pre-existing/unrelated to this PR.
-        streamable_http_path=streamable_http_path  # type: ignore[arg-type]
-        or os.getenv("MCP_PATH", "/mcp"),
+        streamable_http_path=streamable_http_path
+        if streamable_http_path is not None
+        else os.getenv("MCP_PATH", "/mcp"),
         transport_security=transport_security,
     )
 
