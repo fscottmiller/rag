@@ -444,39 +444,55 @@ class SQLiteStore:
             return []
         if len(vector) != self._vector_dimension:
             raise ValueError("Search embedding dimension does not match indexed embeddings")
-        if filter_metadata:
-            # Metadata filtering happens after KNN, adequate for small local indexes.
-            candidate_count = max(1, self._chunk_count_all())
-        else:
-            candidate_count = max(top_k * 10, 50)
-        rows = self.connection.execute(
-            """SELECT c.id, c.document_id, c.ordinal, c.text, c.metadata,
-                      d.title, d.metadata AS document_metadata, v.distance
-               FROM vec_chunks v JOIN chunks c ON c.id = v.chunk_id
-               JOIN documents d ON d.id = c.document_id
-               WHERE v.embedding MATCH ? AND v.k = ? ORDER BY v.distance""",
-            (sqlite_vec.serialize_float32(vector), candidate_count),
-        ).fetchall()
+        candidate_count = max(top_k * 10, 50)
         result = []
-        for row in rows:
-            metadata = self._decode_metadata(row["document_metadata"])
-            if filter_metadata and any(
-                key not in metadata or metadata[key] != value
-                for key, value in filter_metadata.items()
-            ):
-                continue
-            result.append(
-                {
-                    "chunk_id": row["id"],
-                    "document_id": row["document_id"],
-                    "title": row["title"],
-                    "text": row["text"],
-                    "metadata": metadata,
-                    "score": 0.0 if row["distance"] is None else 1.0 - row["distance"],
-                }
+        seen_ids = set()
+
+        while True:
+            cursor = self.connection.execute(
+                """SELECT c.id, c.document_id, c.ordinal, c.text, c.metadata,
+                          d.title, d.metadata AS document_metadata, v.distance
+                   FROM vec_chunks v JOIN chunks c ON c.id = v.chunk_id
+                   JOIN documents d ON d.id = c.document_id
+                   WHERE v.embedding MATCH ? AND v.k = ? ORDER BY v.distance""",
+                (sqlite_vec.serialize_float32(vector), candidate_count),
             )
-            if len(result) >= top_k:
+
+            fetched_count = 0
+            for row in cursor:
+                fetched_count += 1
+                chunk_id = row["id"]
+                if chunk_id in seen_ids:
+                    continue
+                seen_ids.add(chunk_id)
+
+                metadata = self._decode_metadata(row["document_metadata"])
+                if filter_metadata and any(
+                    key not in metadata or metadata[key] != value
+                    for key, value in filter_metadata.items()
+                ):
+                    continue
+
+                result.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "document_id": row["document_id"],
+                        "title": row["title"],
+                        "text": row["text"],
+                        "metadata": metadata,
+                        "score": 0.0 if row["distance"] is None else 1.0 - row["distance"],
+                    }
+                )
+                if len(result) >= top_k:
+                    return result
+
+            # If we didn't fetch as many as we asked for, we've exhausted the index
+            if fetched_count < candidate_count:
                 break
+
+            # Otherwise, we might have more matches in the index, so increase batch size
+            candidate_count *= 4
+
         return result
 
     @_synchronized
