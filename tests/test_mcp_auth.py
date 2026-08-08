@@ -287,3 +287,29 @@ def test_http_role_values_are_compared_case_sensitively(trusted_service, role):
 
     assert result["isError"] is True
     assert result["_meta"]["error_type"] == "not_authorized"
+
+
+@pytest.mark.asyncio
+async def test_direct_call_value_error_fallback(trusted_service):
+    """Test that when ctx.request_context.request raises ValueError, headers fallback to empty."""
+    from unittest.mock import Mock, PropertyMock
+
+    from mcp.server.fastmcp import Context
+
+    server = create_mcp(trusted_service)
+
+    # Create a mock Context where ctx.request_context.request raises ValueError
+    ctx = Mock(spec=Context)
+    mock_rc = Mock()
+    type(mock_rc).request = PropertyMock(side_effect=ValueError("Testing ValueError fallback"))
+    ctx.request_context = mock_rc
+
+    # Call a tool directly with our mock context.
+    # The authorization check should catch the ValueError and use empty headers,
+    # leading to an authentication_required error because we use trusted-proxy auth.
+    tool = server._tool_manager.get_tool("list_documents")
+    result = await tool.fn(ctx=ctx)
+
+    assert result.isError is True
+    assert result.meta == {"error_type": "authentication_required"}
+    assert "Trusted proxy identity is required" in result.content[0].text
