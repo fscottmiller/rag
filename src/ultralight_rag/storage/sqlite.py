@@ -5,10 +5,15 @@ from __future__ import annotations
 import json
 import math
 import re
-import sqlite3
+
+try:
+    import pysqlite3 as sqlite3
+except ImportError:
+    import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
 from numbers import Real
@@ -31,6 +36,15 @@ def _synchronized(method: Callable[..., T]) -> Callable[..., T]:
 
 class DocumentNotFoundError(KeyError):
     """Raised when a document id is not present in the index."""
+
+
+@dataclass
+class Document:
+    title: str
+    content: str
+    metadata: dict[str, Any]
+    chunks: Iterable[str]
+    embeddings: Iterable[list[float]]
 
 
 class SQLiteStore:
@@ -154,17 +168,13 @@ class SQLiteStore:
     @_synchronized
     def create_document(
         self,
-        title: str,
-        content: str,
-        metadata: dict[str, Any],
-        chunks: Iterable[str],
-        embeddings: Iterable[list[float]],
+        document: Document,
         document_id: str | None = None,
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
         document_id = document_id or str(uuid.uuid4())
-        chunks = list(chunks)
-        embeddings = list(embeddings)
+        chunks = list(document.chunks)
+        embeddings = list(document.embeddings)
         embeddings = self._validate_embeddings(chunks, embeddings)
         now = self._now()
         with self.connection:
@@ -175,7 +185,14 @@ class SQLiteStore:
             self.connection.execute(
                 "INSERT INTO documents "
                 "(id,title,content,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-                (document_id, title, content, self._metadata(metadata), now, now),
+                (
+                    document_id,
+                    document.title,
+                    document.content,
+                    self._metadata(document.metadata),
+                    now,
+                    now,
+                ),
             )
             # strict=True documents (and enforces) an invariant already guaranteed by
             # _validate_embeddings above, which raises ValueError on a length mismatch
@@ -314,14 +331,10 @@ class SQLiteStore:
     def replace_document(
         self,
         document_id: str,
-        title: str,
-        content: str,
-        metadata: dict[str, Any],
-        chunks: Iterable[str],
-        embeddings: Iterable[list[float]],
+        document: Document,
         expected_embedding_identity: tuple[str, str, str] | None = None,
     ) -> dict[str, Any]:
-        chunks, embeddings = list(chunks), list(embeddings)
+        chunks, embeddings = list(document.chunks), list(document.embeddings)
         embeddings = self._validate_embeddings(chunks, embeddings)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
@@ -348,7 +361,13 @@ class SQLiteStore:
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             self.connection.execute(
                 "UPDATE documents SET title=?, content=?, metadata=?, updated_at=? WHERE id=?",
-                (title, content, self._metadata(metadata), self._now(), document_id),
+                (
+                    document.title,
+                    document.content,
+                    self._metadata(document.metadata),
+                    self._now(),
+                    document_id,
+                ),
             )
             # strict=True documents (and enforces) an invariant already guaranteed by
             # _validate_embeddings above, which raises ValueError on a length mismatch
