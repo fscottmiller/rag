@@ -506,7 +506,10 @@ class SQLiteStore:
                 break
 
             # Otherwise, we might have more matches in the index, so increase batch size
-            candidate_count *= 4
+            # ponytail: sqlite-vec hard limit is 4096. Stop searching if we hit it.
+            if candidate_count >= 4096:
+                break
+            candidate_count = min(candidate_count * 4, 4096)
 
         return result
 
