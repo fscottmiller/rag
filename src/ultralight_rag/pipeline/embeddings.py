@@ -3,8 +3,6 @@
 import json
 import logging
 import math
-import urllib.error
-import urllib.request
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -13,6 +11,8 @@ from numbers import Real
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -49,28 +49,6 @@ class EmbeddingProviderResponseError(EmbeddingProviderError):
     HTTP status, malformed JSON, the wrong shape, non-finite values, or a
     local model producing garbage output. The provider itself is misbehaving,
     not the network path to it. Maps to HTTP 502 in the REST adapter."""
-
-
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Refuse to follow HTTP redirects.
-
-    ``urllib.request.urlopen`` follows 3xx redirects by default, resending the
-    ``Authorization`` header (and any other request headers) to whatever host the
-    redirect points to, without re-validating the URL scheme. That would defeat the
-    https-only enforcement on external embedding endpoints and let a compromised or
-    malicious provider exfiltrate the API key, or feed back fabricated vectors.
-    Returning ``None`` here tells urllib no handler will perform the redirect, which
-    surfaces it as a normal ``urllib.error.HTTPError`` for the original 3xx status.
-    """
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-# Built once at import time via build_opener() (never urllib.request.install_opener(),
-# which would mutate global process-wide state) so every embedding request goes through
-# an opener that never follows redirects.
-_opener = urllib.request.build_opener(_NoRedirectHandler)
 
 
 def canonical_provider(provider: str) -> str:
@@ -268,6 +246,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         self.timeout = timeout
         self.dimensions = dimensions
         self.batch_size = batch_size
+        self._client = httpx.Client(timeout=self.timeout, follow_redirects=False)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         inputs = list(texts)
@@ -290,40 +269,34 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        # S310 flags this as a possible arbitrary-scheme URL open, but self.url is
-        # already constrained to http/https (and to https with no embedded
-        # credentials for external providers) by the scheme/credential checks in
-        # __init__, and the request is dispatched through _opener, which never
-        # follows redirects - so a malicious 3xx response can't retarget it to an
-        # unvalidated scheme or host after the fact.
-        request = urllib.request.Request(  # noqa: S310
-            self.url,
-            data=json.dumps(payload).encode(),
-            headers=headers,
-            method="POST",
-        )
         try:
-            with _opener.open(request, timeout=self.timeout) as response:
-                raw = response.read(self.max_response_bytes + 1)
-                if len(raw) > self.max_response_bytes:
-                    logger.error("Embedding endpoint %s response exceeds size limit", self.url)
-                    raise EmbeddingProviderResponseError(
-                        "Embedding endpoint response exceeds size limit"
-                    )
-                body = json.loads(raw)
-        except urllib.error.HTTPError as exc:
+            response = self._client.post(self.url, json=payload, headers=headers)
+            response.raise_for_status()
+            raw = response.read()
+            if len(raw) > self.max_response_bytes:
+                logger.error("Embedding endpoint %s response exceeds size limit", self.url)
+                raise EmbeddingProviderResponseError(
+                    "Embedding endpoint response exceeds size limit"
+                )
+            body = json.loads(raw)
+        except httpx.HTTPStatusError as exc:
             # Logged here, in full, for operators. The exception message below also
             # carries this detail (existing tests assert on it via
             # pytest.raises(RuntimeError, match=...)), but callers in api/main.py and
             # mcp_server/server.py must never forward str(exc) to a client: the
             # provider's raw response body can contain upstream hostnames, quota
             # details, or account identifiers.
-            detail = exc.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:500]
-            logger.error("Embedding endpoint %s returned HTTP %s: %r", self.url, exc.code, detail)
+            detail = exc.response.read()[:500].decode("utf-8", errors="replace")
+            logger.error(
+                "Embedding endpoint %s returned HTTP %s: %r",
+                self.url,
+                exc.response.status_code,
+                detail,
+            )
             raise EmbeddingProviderResponseError(
-                f"Embedding endpoint returned HTTP {exc.code}: {detail}"
+                f"Embedding endpoint returned HTTP {exc.response.status_code}: {detail}"
             ) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except httpx.RequestError as exc:
             logger.warning("Embedding endpoint %s request failed: %r", self.url, exc)
             raise EmbeddingProviderUnavailableError(
                 f"Embedding endpoint request failed: {exc}"

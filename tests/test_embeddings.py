@@ -2,14 +2,13 @@ import json
 import sys
 import threading
 import time
-import urllib.error
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
-from ultralight_rag.pipeline import embeddings as embeddings_module
 from ultralight_rag.pipeline.embeddings import (
     BaseEmbedder,
     EmbeddingProviderResponseError,
@@ -323,25 +322,24 @@ def test_openai_compatible_embedder_rejects_http_endpoint():
 
 
 def test_openai_compatible_embedder_limits_http_error_body(monkeypatch):
-    class ErrorBody:
-        def read(self, size):
-            assert size == 4
-            return b"error"
+    class DummyResponse:
+        status_code = 503
 
-        def close(self):
-            pass
+        def read(self):
+            return b"error"
 
     calls = []
 
-    def fake_open(request, timeout=None):
-        calls.append((request, timeout))
-        raise urllib.error.HTTPError("http://embedding.test", 503, "Unavailable", {}, ErrorBody())
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        request = httpx.Request("POST", "http://embedding.test")
+        response = httpx.Response(503, request=request)
+        response.read = DummyResponse().read
+        raise httpx.HTTPStatusError("503", request=request, response=response)
 
-    # The embedder issues requests through the module's no-redirect opener (see F1
-    # fix), not urllib.request.urlopen directly, so that is what must be patched for
-    # this test to actually exercise the code path it claims to.
-    monkeypatch.setattr(embeddings_module._opener, "open", fake_open)
     embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
+    monkeypatch.setattr(embedder._client, "post", fake_post)
+
     embedder.max_response_bytes = 3
     with pytest.raises(RuntimeError, match="HTTP 503: error"):
         embedder.embed(["one"])
@@ -445,17 +443,18 @@ def test_openai_compatible_embedder_does_not_follow_redirects_with_credentials()
 
 def test_openai_compatible_embedder_wraps_timeout_and_connection_errors(monkeypatch):
     def raise_timeout(*_args, **_kwargs):
-        raise TimeoutError("timed out")
+        raise httpx.TimeoutException("timed out")
 
-    monkeypatch.setattr(embeddings_module._opener, "open", raise_timeout)
     embedder = OpenAICompatibleEmbedder("model", "http://embedding.test", provider="ollama")
+    monkeypatch.setattr(embedder._client, "post", raise_timeout)
+
     with pytest.raises(RuntimeError, match=r"Embedding endpoint request failed: timed out"):
         embedder.embed(["one"])
 
     def raise_url_error(*_args, **_kwargs):
-        raise urllib.error.URLError("connection refused")
+        raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(embeddings_module._opener, "open", raise_url_error)
+    monkeypatch.setattr(embedder._client, "post", raise_url_error)
     with pytest.raises(RuntimeError, match=r"Embedding endpoint request failed"):
         embedder.embed(["one"])
 
