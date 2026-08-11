@@ -13,7 +13,6 @@ dependencies = [
   "python-multipart>=0.0.9",
   "sqlite-vec>=0.1.6",
   "uvicorn[standard]>=0.30.0",
-  "pysqlite3-binary>=0.5.4.post2",
 ]
 
 [project.optional-dependencies]

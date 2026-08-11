@@ -1576,16 +1576,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pysqlite3-binary"
-version = "0.5.4.post2"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/40/abd5dc39b7c4a9961f831efb5b8c2f68d6c39499f3b23ea014a592fe8a59/pysqlite3_binary-0.5.4.post2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3060a56666ede382c9af3e4b086e30c9ffb65133b3fa606c2d1b9fbff512f241", size = 4936341, upload-time = "2025-12-03T18:36:23.328Z" },
-    { url = "https://files.pythonhosted.org/packages/35/e8/292e14aa4ed1ef3d4a70703c0103823fcd4b7d9701d9462e52ef88c2cc10/pysqlite3_binary-0.5.4.post2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b6162cd966fa563fe85b5372c3e61d11dd7903bd0f09cc185cb0a4c9125f4a0f", size = 4951088, upload-time = "2025-12-03T18:36:39.786Z" },
-    { url = "https://files.pythonhosted.org/packages/5d/89/338819970e306cae579aa570091a35d01df01d95fe159f2e5002b58b7481/pysqlite3_binary-0.5.4.post2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:930c7597a0863ef3da721e538756c2768cee14cb9b8d2c037263d061b24f66a5", size = 4943344, upload-time = "2025-12-03T18:36:54.992Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2316,7 +2306,6 @@ dependencies = [
     { name = "fastembed" },
     { name = "mcp" },
     { name = "onnxruntime", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
-    { name = "pysqlite3-binary" },
     { name = "python-multipart" },
     { name = "sqlite-vec" },
     { name = "uvicorn", extra = ["standard"] },
@@ -2345,7 +2334,6 @@ requires-dist = [
     { name = "fastembed", specifier = ">=0.7.4" },
     { name = "mcp", specifier = ">=1.27,<2" },
     { name = "onnxruntime", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "<1.24" },
-    { name = "pysqlite3-binary", specifier = ">=0.5.4.post2" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "sentence-transformers", marker = "extra == 'local-embeddings'", specifier = ">=3.4.0" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },

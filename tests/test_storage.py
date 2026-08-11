@@ -1,7 +1,4 @@
-try:
-    import pysqlite3 as sqlite3
-except ImportError:
-    import sqlite3
+import sqlite3
 
 import pytest
 
@@ -48,16 +45,7 @@ def test_store_is_usable_as_a_context_manager_and_closes_on_exit():
             )
         )
         assert vector_rows(store) == 1
-    with pytest.raises(
-        (
-            sqlite3.ProgrammingError,
-            getattr(
-                __import__("sys").modules.get("pysqlite3", __import__("sqlite3")),
-                "ProgrammingError",
-                sqlite3.ProgrammingError,
-            ),
-        )
-    ):
+    with pytest.raises(sqlite3.ProgrammingError):
         store.connection.execute("SELECT 1")
 
 
@@ -65,16 +53,7 @@ def test_store_context_manager_closes_even_when_the_body_raises():
     with pytest.raises(ValueError):
         with SQLiteStore() as store:
             raise ValueError("boom")
-    with pytest.raises(
-        (
-            sqlite3.ProgrammingError,
-            getattr(
-                __import__("sys").modules.get("pysqlite3", __import__("sqlite3")),
-                "ProgrammingError",
-                sqlite3.ProgrammingError,
-            ),
-        )
-    ):
+    with pytest.raises(sqlite3.ProgrammingError):
         store.connection.execute("SELECT 1")
 
 

@@ -5,11 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-
-try:
-    import pysqlite3 as sqlite3
-except ImportError:
-    import sqlite3
+import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Iterable

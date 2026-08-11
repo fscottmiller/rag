@@ -196,14 +196,7 @@ def test_concurrent_access_never_raises_sqlite_programming_error():
 
     try:
         _run_threads([make_worker(i) for i in range(THREAD_COUNT)])
-    except (
-        sqlite3.ProgrammingError,
-        getattr(
-            __import__("sys").modules.get("pysqlite3", __import__("sqlite3")),
-            "ProgrammingError",
-            sqlite3.ProgrammingError,
-        ),
-    ) as exc:  # pragma: no cover - would fail the test below
+    except sqlite3.ProgrammingError as exc:  # pragma: no cover - would fail the test below
         raise AssertionError(f"shared connection was not safely serialized: {exc}") from exc
     finally:
         store.close()
