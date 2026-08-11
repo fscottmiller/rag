@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from ultralight_rag.storage.sqlite import Document, DocumentNotFoundError, SQLiteStore
 
 
 def vector_rows(store: SQLiteStore) -> int:
@@ -57,11 +57,13 @@ def test_create_schema_reraises_other_operational_errors():
 def test_storage_round_trip_and_chunk_metadata():
     store = SQLiteStore()
     created = store.create_document(
-        "Guide",
-        "full text",
-        {"source": "test", "nested": {"section": 2}},
-        ["first", "second"],
-        [[1.0, 0.0], [0.0, 1.0]],
+        Document(
+            title="Guide",
+            content="full text",
+            metadata={"source": "test", "nested": {"section": 2}},
+            chunks=["first", "second"],
+            embeddings=[[1.0, 0.0], [0.0, 1.0]],
+        ),
         document_id="doc-1",
     )
 
@@ -78,7 +80,15 @@ def test_storage_round_trip_and_chunk_metadata():
 
 def test_store_is_usable_as_a_context_manager_and_closes_on_exit():
     with SQLiteStore() as store:
-        store.create_document("Guide", "text", {}, ["chunk"], [[1.0, 0.0]])
+        store.create_document(
+            Document(
+                title="Guide",
+                content="text",
+                metadata={},
+                chunks=["chunk"],
+                embeddings=[[1.0, 0.0]],
+            )
+        )
         assert vector_rows(store) == 1
     with pytest.raises(sqlite3.ProgrammingError):
         store.connection.execute("SELECT 1")
@@ -101,7 +111,11 @@ def test_close_is_idempotent():
 def test_file_database_reloads_vector_dimension(tmp_path):
     database = tmp_path / "index.sqlite3"
     first = SQLiteStore(str(database))
-    first.create_document("Guide", "text", {}, ["text"], [[1.0, 0.0]])
+    first.create_document(
+        Document(
+            title="Guide", content="text", metadata={}, chunks=["text"], embeddings=[[1.0, 0.0]]
+        )
+    )
     assert first.connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert first.connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
 
@@ -114,14 +128,38 @@ def test_file_database_reloads_vector_dimension(tmp_path):
 
 def test_replace_and_delete_remove_old_vectors():
     store = SQLiteStore()
-    created = store.create_document("Old", "old", {}, ["old", "also old"], [[1.0, 0.0], [0.9, 0.1]])
+    created = store.create_document(
+        Document(
+            title="Old",
+            content="old",
+            metadata={},
+            chunks=["old", "also old"],
+            embeddings=[[1.0, 0.0], [0.9, 0.1]],
+        )
+    )
     assert vector_rows(store) == 2
     with pytest.raises(ValueError, match="one embedding"):
-        store.replace_document(created["id"], "Bad", "bad", {}, ["one", "two"], [[1.0, 0.0]])
+        store.replace_document(
+            created["id"],
+            Document(
+                title="Bad",
+                content="bad",
+                metadata={},
+                chunks=["one", "two"],
+                embeddings=[[1.0, 0.0]],
+            ),
+        )
     assert store.get_document(created["id"])["title"] == "Old"
 
     replaced = store.replace_document(
-        created["id"], "New", "new", {"version": 2}, ["new"], [[0.0, 1.0]]
+        created["id"],
+        Document(
+            title="New",
+            content="new",
+            metadata={"version": 2},
+            chunks=["new"],
+            embeddings=[[0.0, 1.0]],
+        ),
     )
     assert replaced["title"] == "New"
     assert replaced["chunk_count"] == 1
@@ -140,21 +178,34 @@ def test_empty_index_identity_replacement_drops_old_vector_schema(tmp_path):
     database = tmp_path / "index.sqlite3"
     first = SQLiteStore(str(database))
     first.ensure_embedding_configuration("fastembed", "first", "first")
-    document = first.create_document("First", "text", {}, ["text"], [[1.0]])
+    document = first.create_document(
+        Document(title="First", content="text", metadata={}, chunks=["text"], embeddings=[[1.0]])
+    )
     first.delete_document(document["id"])
     first.ensure_embedding_configuration("fastembed", "second", "second")
-    first.create_document("Second", "text", {}, ["text"], [[1.0, 0.0]])
+    first.create_document(
+        Document(
+            title="Second", content="text", metadata={}, chunks=["text"], embeddings=[[1.0, 0.0]]
+        )
+    )
     assert first.search([1.0, 0.0], 1)[0]["title"] == "Second"
     first.close()
 
 
 def test_replace_and_delete_preserve_not_found_contract_for_empty_documents():
     store = SQLiteStore()
-    store.create_document("Empty", "", {}, [], [], document_id="empty")
-    store.replace_document("empty", "Still empty", "", {}, [], [])
+    store.create_document(
+        Document(title="Empty", content="", metadata={}, chunks=[], embeddings=[]),
+        document_id="empty",
+    )
+    store.replace_document(
+        "empty", Document(title="Still empty", content="", metadata={}, chunks=[], embeddings=[])
+    )
     store.delete_document("empty")
     with pytest.raises(DocumentNotFoundError):
-        store.replace_document("missing", "Missing", "", {}, [], [])
+        store.replace_document(
+            "missing", Document(title="Missing", content="", metadata={}, chunks=[], embeddings=[])
+        )
     store.close()
 
 
@@ -163,7 +214,11 @@ def test_search_refreshes_vector_dimension_for_late_writer(tmp_path):
     reader = SQLiteStore(str(database))
     writer = SQLiteStore(str(database))
     assert reader.search([1.0, 0.0], 1) == []
-    writer.create_document("Guide", "text", {}, ["text"], [[1.0, 0.0]])
+    writer.create_document(
+        Document(
+            title="Guide", content="text", metadata={}, chunks=["text"], embeddings=[[1.0, 0.0]]
+        )
+    )
 
     assert reader.search([1.0, 0.0], 1)[0]["title"] == "Guide"
     reader.close()
@@ -173,18 +228,56 @@ def test_search_refreshes_vector_dimension_for_late_writer(tmp_path):
 def test_storage_rejects_mismatched_or_empty_embeddings():
     store = SQLiteStore()
     with pytest.raises(ValueError, match="one embedding"):
-        store.create_document("Bad", "text", {}, ["one", "two"], [[1.0, 0.0]])
+        store.create_document(
+            Document(
+                title="Bad",
+                content="text",
+                metadata={},
+                chunks=["one", "two"],
+                embeddings=[[1.0, 0.0]],
+            )
+        )
     with pytest.raises(ValueError, match="same non-zero dimension"):
-        store.create_document("Bad", "text", {}, ["one", "two"], [[1.0, 0.0], [1.0]])
+        store.create_document(
+            Document(
+                title="Bad",
+                content="text",
+                metadata={},
+                chunks=["one", "two"],
+                embeddings=[[1.0, 0.0], [1.0]],
+            )
+        )
     with pytest.raises(ValueError, match="same non-zero dimension"):
-        store.create_document("Bad", "text", {}, ["one"], [[]])
+        store.create_document(
+            Document(title="Bad", content="text", metadata={}, chunks=["one"], embeddings=[[]])
+        )
     with pytest.raises(ValueError, match="finite"):
-        store.create_document("Bad", "text", {}, ["one"], [[float("nan")]])
+        store.create_document(
+            Document(
+                title="Bad",
+                content="text",
+                metadata={},
+                chunks=["one"],
+                embeddings=[[float("nan")]],
+            )
+        )
     with pytest.raises(ValueError, match="finite"):
-        store.create_document("Bad", "text", {}, ["one"], [["not-a-number"]])
+        store.create_document(
+            Document(
+                title="Bad",
+                content="text",
+                metadata={},
+                chunks=["one"],
+                embeddings=[["not-a-number"]],
+            )
+        )
     for value in (True, "1.0"):
         with pytest.raises(ValueError, match="finite"):
-            store.create_document("Bad", "text", {}, ["one"], [[value]])
+            store.create_document(
+                Document(
+                    title="Bad", content="text", metadata={}, chunks=["one"], embeddings=[[value]]
+                )
+            )
     store.close()
 
 
@@ -192,18 +285,22 @@ def test_metadata_filter_searches_beyond_initial_candidate_window():
     store = SQLiteStore()
     for index in range(60):
         store.create_document(
-            f"Document {index}",
-            "SQLite content",
-            {"group": "other"},
-            [f"chunk {index}"],
-            [[1.0, 0.0]],
+            Document(
+                title=f"Document {index}",
+                content="SQLite content",
+                metadata={"group": "other"},
+                chunks=[f"chunk {index}"],
+                embeddings=[[1.0, 0.0]],
+            )
         )
     target = store.create_document(
-        "Target",
-        "SQLite content",
-        {"group": "target"},
-        ["target chunk"],
-        [[1.0, 0.0]],
+        Document(
+            title="Target",
+            content="SQLite content",
+            metadata={"group": "target"},
+            chunks=["target chunk"],
+            embeddings=[[1.0, 0.0]],
+        )
     )
 
     results = store.search([1.0, 0.0], 1, {"group": "target"})
@@ -213,8 +310,20 @@ def test_metadata_filter_searches_beyond_initial_candidate_window():
 
 def test_metadata_filter_distinguishes_missing_and_null_values():
     store = SQLiteStore()
-    store.create_document("Missing", "text", {}, ["text"], [[1.0, 0.0]])
-    explicit_null = store.create_document("Null", "text", {"topic": None}, ["text"], [[1.0, 0.0]])
+    store.create_document(
+        Document(
+            title="Missing", content="text", metadata={}, chunks=["text"], embeddings=[[1.0, 0.0]]
+        )
+    )
+    explicit_null = store.create_document(
+        Document(
+            title="Null",
+            content="text",
+            metadata={"topic": None},
+            chunks=["text"],
+            embeddings=[[1.0, 0.0]],
+        )
+    )
 
     results = store.search([1.0, 0.0], 2, {"topic": None})
     assert [item["document_id"] for item in results] == [explicit_null["id"]]
@@ -223,7 +332,11 @@ def test_metadata_filter_distinguishes_missing_and_null_values():
 
 def test_search_rejects_wrong_embedding_dimension_and_empty_index_filter():
     store = SQLiteStore()
-    created = store.create_document("Guide", "text", {}, ["text"], [[1.0, 0.0]])
+    created = store.create_document(
+        Document(
+            title="Guide", content="text", metadata={}, chunks=["text"], embeddings=[[1.0, 0.0]]
+        )
+    )
     with pytest.raises(ValueError, match="dimension"):
         store.search([1.0], 1)
     store.delete_document(created["id"])
@@ -259,9 +372,29 @@ def test_search_score_is_cosine_similarity_ranging_from_negative_one_to_one():
     # under that mutation because it pins the negative score exactly and
     # checks strict descending order.
     store = SQLiteStore()
-    identical = store.create_document("Identical", "text", {}, ["chunk"], [[1.0, 0.0]])
-    orthogonal = store.create_document("Orthogonal", "text", {}, ["chunk"], [[0.0, 1.0]])
-    opposed = store.create_document("Opposed", "text", {}, ["chunk"], [[-1.0, 0.0]])
+    identical = store.create_document(
+        Document(
+            title="Identical",
+            content="text",
+            metadata={},
+            chunks=["chunk"],
+            embeddings=[[1.0, 0.0]],
+        )
+    )
+    orthogonal = store.create_document(
+        Document(
+            title="Orthogonal",
+            content="text",
+            metadata={},
+            chunks=["chunk"],
+            embeddings=[[0.0, 1.0]],
+        )
+    )
+    opposed = store.create_document(
+        Document(
+            title="Opposed", content="text", metadata={}, chunks=["chunk"], embeddings=[[-1.0, 0.0]]
+        )
+    )
 
     results = store.search([1.0, 0.0], 3)
 
@@ -298,16 +431,36 @@ def test_ensure_vector_table_rejects_mismatched_dimension_on_same_store():
     # leaves all other tests passing, so it needs a direct trigger: create a
     # 2-dim document, then attempt a 3-dim document on the same store.
     store = SQLiteStore()
-    store.create_document("First", "text", {}, ["chunk"], [[1.0, 0.0]])
+    store.create_document(
+        Document(
+            title="First", content="text", metadata={}, chunks=["chunk"], embeddings=[[1.0, 0.0]]
+        )
+    )
     with pytest.raises(ValueError, match="must have the same dimension"):
-        store.create_document("Second", "text", {}, ["chunk"], [[1.0, 0.0, 0.0]])
+        store.create_document(
+            Document(
+                title="Second",
+                content="text",
+                metadata={},
+                chunks=["chunk"],
+                embeddings=[[1.0, 0.0, 0.0]],
+            )
+        )
     store.close()
 
 
 def test_search_top_k_larger_than_corpus_returns_exactly_all_results():
     store = SQLiteStore()
     for index in range(5):
-        store.create_document(f"Document {index}", "text", {}, [f"chunk {index}"], [[1.0, 0.0]])
+        store.create_document(
+            Document(
+                title=f"Document {index}",
+                content="text",
+                metadata={},
+                chunks=[f"chunk {index}"],
+                embeddings=[[1.0, 0.0]],
+            )
+        )
 
     results = store.search([1.0, 0.0], 50)
 
@@ -320,7 +473,15 @@ def test_search_top_k_larger_than_corpus_returns_exactly_all_results():
 
 def test_delete_document_cascades_to_chunks_table():
     store = SQLiteStore()
-    created = store.create_document("Old", "old", {}, ["old", "also old"], [[1.0, 0.0], [0.9, 0.1]])
+    created = store.create_document(
+        Document(
+            title="Old",
+            content="old",
+            metadata={},
+            chunks=["old", "also old"],
+            embeddings=[[1.0, 0.0], [0.9, 0.1]],
+        )
+    )
     assert (
         store.connection.execute(
             "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (created["id"],)

@@ -13,7 +13,7 @@ from .pipeline.embeddings import (
     create_embedder,
     embedding_configuration,
 )
-from .storage.sqlite import SQLiteStore
+from .storage.sqlite import Document, SQLiteStore
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,13 @@ class RAGService:
             logger.warning("Embedding provider failure while ingesting document %r", title)
             raise
         document = self.store.create_document(
-            title,
-            content,
-            metadata or {},
-            chunks,
-            embeddings,
+            Document(
+                title=title,
+                content=content,
+                metadata=metadata or {},
+                chunks=chunks,
+                embeddings=embeddings,
+            ),
             expected_embedding_identity=self._embedding_identity,
         )
         logger.info(
@@ -132,11 +134,13 @@ class RAGService:
             raise
         document = self.store.replace_document(
             document_id,
-            title,
-            content,
-            metadata or {},
-            chunks,
-            embeddings,
+            Document(
+                title=title,
+                content=content,
+                metadata=metadata or {},
+                chunks=chunks,
+                embeddings=embeddings,
+            ),
             expected_embedding_identity=self._embedding_identity,
         )
         logger.info(

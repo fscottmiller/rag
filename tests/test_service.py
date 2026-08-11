@@ -7,7 +7,7 @@ from ultralight_rag.pipeline.embeddings import (
     OpenAICompatibleEmbedder,
 )
 from ultralight_rag.service import DocumentTooLargeError, RAGService
-from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
+from ultralight_rag.storage.sqlite import Document, DocumentNotFoundError, SQLiteStore
 
 
 class _OneChunk:
@@ -173,7 +173,11 @@ def test_service_update_accepts_and_rejects_at_exact_document_byte_limit(service
 def test_service_requires_reindex_for_legacy_nonempty_index(tmp_path):
     database = tmp_path / "legacy.sqlite3"
     legacy = SQLiteStore(str(database))
-    legacy.create_document("Old", "text", {}, ["text"], [[1.0] * 384])
+    legacy.create_document(
+        Document(
+            title="Old", content="text", metadata={}, chunks=["text"], embeddings=[[1.0] * 384]
+        )
+    )
     legacy.close()
 
     with pytest.raises(ValueError, match="reindex"):
@@ -188,7 +192,9 @@ def test_service_requires_reindex_for_legacy_nonempty_index(tmp_path):
 def test_service_requires_reindex_for_nonempty_two_column_metadata(tmp_path):
     database = tmp_path / "legacy-metadata.sqlite3"
     legacy = SQLiteStore(str(database))
-    legacy.create_document("Old", "text", {}, ["text"], [[1.0]])
+    legacy.create_document(
+        Document(title="Old", content="text", metadata={}, chunks=["text"], embeddings=[[1.0]])
+    )
     legacy.connection.executescript(
         """
         DROP TABLE index_metadata;
@@ -212,7 +218,9 @@ def test_service_rejects_different_embedding_model_for_existing_index(tmp_path):
     first = RAGService(
         SQLiteStore(str(database)), FastEmbedEmbedder("first-model"), object(), settings
     )
-    first.store.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.store.create_document(
+        Document(title="First", content="text", metadata={}, chunks=["text"], embeddings=[[1.0]])
+    )
     first.store.close()
 
     with pytest.raises(ValueError, match="configuration"):
@@ -452,7 +460,9 @@ def test_embedding_endpoint_keeps_non_secret_query_parameters_in_identity(tmp_pa
         ),
         object(),
     )
-    first.store.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.store.create_document(
+        Document(title="First", content="text", metadata={}, chunks=["text"], embeddings=[[1.0]])
+    )
     first.store.close()
 
     with pytest.raises(ValueError, match="configuration"):
@@ -486,7 +496,9 @@ def test_external_endpoint_or_dimensions_change_index_identity(tmp_path):
         ),
         object(),
     )
-    first.store.create_document("First", "text", {}, ["text"], [[1.0]])
+    first.store.create_document(
+        Document(title="First", content="text", metadata={}, chunks=["text"], embeddings=[[1.0]])
+    )
     first.store.close()
     with pytest.raises(ValueError, match="configuration"):
         RAGService(

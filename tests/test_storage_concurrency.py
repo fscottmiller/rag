@@ -17,7 +17,7 @@ import queue
 import sqlite3
 import threading
 
-from ultralight_rag.storage.sqlite import SQLiteStore
+from ultralight_rag.storage.sqlite import Document, SQLiteStore
 
 THREAD_COUNT = 12
 
@@ -54,11 +54,13 @@ def test_concurrent_create_document_from_many_threads_produces_exact_counts():
         def create():
             barrier.wait()
             store.create_document(
-                f"Doc {index}",
-                "text",
-                {},
-                [f"chunk {index}"],
-                [[float(index), 1.0]],
+                Document(
+                    title=f"Doc {index}",
+                    content="text",
+                    metadata={},
+                    chunks=[f"chunk {index}"],
+                    embeddings=[[float(index), 1.0]],
+                ),
                 document_id=f"doc-{index}",
             )
 
@@ -78,11 +80,13 @@ def test_concurrent_search_calls_return_coherent_results_without_corruption():
     store = SQLiteStore()
     for index in range(THREAD_COUNT):
         store.create_document(
-            f"Doc {index}",
-            "text",
-            {},
-            [f"chunk {index}"],
-            [[1.0, 0.0]],
+            Document(
+                title=f"Doc {index}",
+                content="text",
+                metadata={},
+                chunks=[f"chunk {index}"],
+                embeddings=[[1.0, 0.0]],
+            ),
             document_id=f"doc-{index}",
         )
 
@@ -127,11 +131,13 @@ def test_concurrent_creates_and_searches_interleave_without_error():
         def write():
             barrier.wait()
             store.create_document(
-                f"Doc {index}",
-                "text",
-                {},
-                [f"chunk {index}"],
-                [[1.0, 0.0]],
+                Document(
+                    title=f"Doc {index}",
+                    content="text",
+                    metadata={},
+                    chunks=[f"chunk {index}"],
+                    embeddings=[[1.0, 0.0]],
+                ),
                 document_id=f"doc-{index}",
             )
 
@@ -174,11 +180,13 @@ def test_concurrent_access_never_raises_sqlite_programming_error():
             barrier.wait()
             if index % 2 == 0:
                 store.create_document(
-                    f"Doc {index}",
-                    "text",
-                    {},
-                    [f"chunk {index}"],
-                    [[1.0, 0.0]],
+                    Document(
+                        title=f"Doc {index}",
+                        content="text",
+                        metadata={},
+                        chunks=[f"chunk {index}"],
+                        embeddings=[[1.0, 0.0]],
+                    ),
                     document_id=f"doc-{index}",
                 )
             else:
