@@ -83,15 +83,21 @@ def test_recursive_chunker_warns_once_per_call_on_missing_index(monkeypatch, cap
         assert "irrelevant input" not in record.getMessage()
 
 
-def test_chunk_text_treats_non_str_text_attribute_as_missing():
-    # A duck-typed result whose .text is present but None (or any non-str)
-    # must not be silently ingested as garbage repr text passing truthiness
-    # checks; it should fall back to str(result), same as a fully absent
-    # .text attribute.
+@pytest.mark.parametrize("text_value", [b"bee", 123, ["a"], None])
+def test_chunk_text_treats_non_str_text_attribute_as_missing(text_value):
+    # A duck-typed result whose .text is present but not a str must fall back
+    # to str(result), same as a fully absent .text attribute.
+    #
+    # bytes is the case that motivated the isinstance guard: it was previously
+    # returned verbatim and appended to chunks, so a non-str slipped into
+    # document text silently. int/list were returned verbatim too but crashed
+    # at the caller's .strip(); None already fell through. Only the non-None
+    # values distinguish this guard from a plain `is not None` check, so they
+    # are what make this a regression test rather than a tautology.
     from ultralight_rag.pipeline.chunking import _chunk_text
 
     class Weird:
-        text = None
+        text = text_value
 
         def __str__(self) -> str:
             return "weird repr"
