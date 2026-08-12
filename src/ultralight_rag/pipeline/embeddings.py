@@ -152,13 +152,16 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             raise ValueError("embedding model must not be empty")
         self.model_name = model_name
         self._model = None
+        self._model_lock = Lock()
 
     @property
     def model(self):
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            with self._model_lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name)
+                    self._model = SentenceTransformer(self.model_name)
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:

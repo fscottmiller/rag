@@ -148,6 +148,40 @@ def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypa
     assert constructed == ["test-model"]
 
 
+def test_sentence_transformer_constructs_its_model_once_under_concurrent_first_use(
+    monkeypatch,
+):
+    constructed = []
+    start = threading.Barrier(3)
+
+    class Model:
+        def encode(self, inputs, convert_to_numpy=True):
+            return SimpleNamespace(tolist=lambda: [[1.0] for _ in inputs])
+
+    def build(name):
+        constructed.append(name)
+        time.sleep(0.01)
+        return Model()
+
+    monkeypatch.setitem(
+        sys.modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=build)
+    )
+    embedder = SentenceTransformerEmbedder("test-model")
+
+    def embed():
+        start.wait()
+        assert embedder.embed(["text"]) == [[1.0]]
+
+    threads = [threading.Thread(target=embed) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
+    assert constructed == ["test-model"]
+
+
 def test_ollama_uses_openai_compatible_embeddings_endpoint():
     embedder = create_embedder(
         "ollama",

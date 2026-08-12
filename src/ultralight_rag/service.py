@@ -13,7 +13,7 @@ from .pipeline.embeddings import (
     create_embedder,
     embedding_configuration,
 )
-from .storage.sqlite import Document, SQLiteStore
+from .storage.sqlite import Document, DocumentNotFoundError, SQLiteStore
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,12 @@ class RAGService:
         chunks = self.chunker.chunk(content)
         if not chunks:
             raise ValueError("content must contain at least one non-whitespace character")
-        embeddings = []
-        for start in range(0, len(chunks), self.settings.embedding_batch_size):
-            embeddings.extend(
-                self.embedder.embed(chunks[start : start + self.settings.embedding_batch_size])
-            )
+        # Batching into RAG_EMBEDDING_BATCH_SIZE-sized requests is the embedder's job, not
+        # ours: OpenAICompatibleEmbedder.embed already slices by self.batch_size, and it is
+        # the only implementation for which per-request size is even a concern (FastEmbed and
+        # SentenceTransformers take the whole list in one local call). Slicing here too just
+        # produced a redundant outer batch that the embedder's inner loop no-opped on.
+        embeddings = self.embedder.embed(chunks)
         return chunks, embeddings
 
     def ingest(
@@ -121,7 +122,8 @@ class RAGService:
     ) -> dict[str, Any]:
         if not title.strip():
             raise ValueError("title must contain at least one non-whitespace character")
-        self.store.get_document(document_id)
+        if not self.store.document_exists(document_id):
+            raise DocumentNotFoundError(document_id)
         self.store.preflight_embedding_configuration(self._embedding_identity)
         try:
             chunks, embeddings = self._prepare(content)

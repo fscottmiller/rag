@@ -222,14 +222,25 @@ class SQLiteStore:
 
     @_synchronized
     def list_documents(self) -> list[dict[str, Any]]:
-        # ⚡ Bolt: Replaced a `LEFT JOIN ... GROUP BY d.id` with a correlated scalar subquery.
-        # This optimizes performance significantly (removes grouping overhead, uses index lookups)
-        # by leveraging the existing UNIQUE(document_id, ordinal) index on the chunks table.
+        # Uses a correlated scalar subquery instead of `LEFT JOIN ... GROUP BY d.id` to
+        # compute chunk_count per document, leveraging the existing
+        # UNIQUE(document_id, ordinal) index on the chunks table rather than forming a
+        # grouped temporary table over the whole join.
         rows = self.connection.execute(
-            """SELECT d.*, (SELECT COUNT(id) FROM chunks WHERE document_id = d.id) AS chunk_count
+            """SELECT d.*, (SELECT COUNT(*) FROM chunks WHERE document_id = d.id) AS chunk_count
                FROM documents d ORDER BY d.created_at"""
         ).fetchall()
-        return [self._document_summary(row) for row in rows]
+        return [self._document_summary(row, chunk_count=row["chunk_count"]) for row in rows]
+
+    @_synchronized
+    def document_exists(self, document_id: str) -> bool:
+        """Cheap existence probe: one indexed lookup, no content or chunks loaded."""
+        return (
+            self.connection.execute(
+                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+            is not None
+        )
 
     @_synchronized
     def get_document(self, document_id: str) -> dict[str, Any]:
@@ -238,8 +249,7 @@ class SQLiteStore:
         ).fetchone()
         if row is None:
             raise DocumentNotFoundError(document_id)
-        result = self._document_summary(row)
-        result["chunks"] = [
+        chunks = [
             {
                 "id": item["id"],
                 "ordinal": item["ordinal"],
@@ -250,25 +260,22 @@ class SQLiteStore:
                 "SELECT * FROM chunks WHERE document_id = ? ORDER BY ordinal", (document_id,)
             )
         ]
+        # chunk_count is already implied by the chunk rows just fetched above, so pass
+        # it through explicitly instead of running a separate COUNT(*) query for it.
+        result = self._document_summary(row, chunk_count=len(chunks))
+        result["chunks"] = chunks
         result["content"] = row["content"]
         return result
 
-    def _document_summary(self, row: sqlite3.Row) -> dict[str, Any]:
+    def _document_summary(self, row: sqlite3.Row, chunk_count: int) -> dict[str, Any]:
         return {
             "id": row["id"],
             "title": row["title"],
             "metadata": self._decode_metadata(row["metadata"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "chunk_count": row["chunk_count"]
-            if "chunk_count" in row.keys()
-            else self._chunk_count(row["id"]),
+            "chunk_count": chunk_count,
         }
-
-    def _chunk_count(self, document_id: str) -> int:
-        return self.connection.execute(
-            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (document_id,)
-        ).fetchone()[0]
 
     def _chunk_count_all(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
