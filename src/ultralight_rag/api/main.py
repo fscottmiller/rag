@@ -127,7 +127,13 @@ def create_app(
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(rag.settings.trusted_hosts))
 
     def require(request: Request, action: str) -> None:
-        if action == "write" and authorizer.mode == "none":
+        # Origin check runs for every write in every auth mode, not just "none".
+        # In trusted-proxy mode the browser still carries the proxy's ambient
+        # session cookie; POST /documents is a CORS-simple request (no
+        # preflight), so without this check a cross-origin page could trigger
+        # a write and have the proxy authenticate it on the visitor's behalf.
+        # Requests with no Origin header (non-browser callers) are unaffected.
+        if action == "write":
             origin = request.headers.get("origin")
             if origin:
                 if not _same_origin(origin, request):

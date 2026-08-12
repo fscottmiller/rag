@@ -72,6 +72,33 @@ def test_rest_rejects_cross_origin_mutations_in_open_mode(service):
     assert service.list_documents() == []
 
 
+def test_rest_rejects_cross_origin_mutations_in_trusted_proxy_mode(service):
+    # Regression test for #50: the Origin check must not be gated on
+    # auth_mode == "none". trusted-proxy mode is exactly the deployment where
+    # a browser carries an ambient, proxy-authenticated session cookie, so a
+    # cross-origin POST (CORS-simple, no preflight) must still be rejected
+    # before the write reaches the authorizer, even with valid role headers.
+    protected_service = RAGService(
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(auth_mode="trusted-proxy"),
+    )
+    client = TestClient(create_app(protected_service))
+    admin_headers = {
+        "Cf-Access-Authenticated-User-Email": "admin@example.test",
+        "X-Auth-Request-Role": "admin",
+        "Origin": "https://evil.example",
+    }
+    response = client.post(
+        "/documents",
+        data={"title": "Injected", "content": "cross-origin"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 403
+    assert protected_service.list_documents() == []
+
+
 def test_rest_rejects_same_host_with_different_scheme(service):
     with TestClient(create_app(service), base_url="https://testserver") as client:
         response = client.post(
