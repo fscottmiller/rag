@@ -86,23 +86,20 @@ class Settings:
     def from_env(cls) -> "Settings":
         provider = os.getenv("RAG_EMBEDDING_PROVIDER")
         configured_api_key = os.getenv("RAG_EMBEDDING_API_KEY", "").strip()
+        openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
 
         if provider is None:
-            api_key = configured_api_key or os.getenv("OPENAI_API_KEY", "").strip()
-            provider = "openai-compatible" if api_key else "fastembed"
-        else:
-            normalized_explicit_provider = provider.lower().replace("_", "-")
-            provider_config = PROVIDER_DEFAULTS.get(
-                normalized_explicit_provider, PROVIDER_DEFAULTS["default"]
-            )
-            api_key = configured_api_key or (
-                os.getenv("OPENAI_API_KEY", "").strip()
-                if provider_config["uses_openai_key"]
-                else ""
+            provider = (
+                "openai-compatible" if (configured_api_key or openai_api_key) else "fastembed"
             )
 
         normalized_provider = provider.lower().replace("_", "-")
         provider_config = PROVIDER_DEFAULTS.get(normalized_provider, PROVIDER_DEFAULTS["default"])
+
+        api_key = configured_api_key or (
+            openai_api_key if provider_config["uses_openai_key"] else ""
+        )
+
         default_model = provider_config["model"]
         default_url = provider_config["url"]
 
