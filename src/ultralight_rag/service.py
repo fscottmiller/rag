@@ -78,8 +78,10 @@ class RAGService:
             raise ValueError("content must contain at least one non-whitespace character")
         # Batching into RAG_EMBEDDING_BATCH_SIZE-sized requests is the embedder's job, not
         # ours: OpenAICompatibleEmbedder.embed already slices by self.batch_size, and it is
-        # the only implementation for which per-request size is even a concern (FastEmbed and
-        # SentenceTransformers take the whole list in one local call). Slicing here too just
+        # the only implementation for which per-request size is even a concern. FastEmbed and
+        # SentenceTransformers receive the whole list in one local call and batch internally
+        # within it (fastembed defaults to 256, sentence-transformers to 32), which is their
+        # own business, not something the service needs to size. Slicing here too just
         # produced a redundant outer batch that the embedder's inner loop no-opped on.
         embeddings = self.embedder.embed(chunks)
         return chunks, embeddings

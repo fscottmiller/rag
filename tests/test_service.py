@@ -91,7 +91,7 @@ def test_update_checks_document_existence_before_embedding(service):
     assert embedder.calls == 0
 
 
-def test_service_delegates_batching_to_the_embedder(service):
+def test_service_no_longer_batches_before_calling_the_embedder(service):
     # Batching by RAG_EMBEDDING_BATCH_SIZE is now solely the embedder's job (see
     # test_openai_compatible_embedder_sends_batch_and_preserves_indexes in
     # test_embeddings.py for the actual bounded-request guarantee). The service no

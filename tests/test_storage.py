@@ -87,13 +87,22 @@ def test_get_document_runs_exactly_two_queries_not_three():
         document_id="doc-1",
     )
     queries = []
-    store.connection.set_trace_callback(queries.append)
-    document = store.get_document("doc-1")
-    store.connection.set_trace_callback(None)
+    try:
+        store.connection.set_trace_callback(queries.append)
+        document = store.get_document("doc-1")
+    finally:
+        store.connection.set_trace_callback(None)
+        store.close()
     assert document["chunk_count"] == 2
-    assert len(queries) == 2
     assert not any("COUNT" in query for query in queries)
-    store.close()
+    # Names the two statements get_document is expected to run (document row, then
+    # chunks), rather than bare-counting them: a future legitimate query added to
+    # get_document would break a bare `len(queries) == 2` for the wrong reason, while
+    # naming the tables keeps the COUNT-elimination assertion above load-bearing.
+    queried_tables = [
+        table for query in queries for table in ("documents", "chunks") if f"FROM {table}" in query
+    ]
+    assert queried_tables == ["documents", "chunks"]
 
 
 def test_storage_round_trip_and_chunk_metadata():
