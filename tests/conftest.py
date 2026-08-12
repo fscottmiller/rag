@@ -1,9 +1,25 @@
 import pytest
 
+from ultralight_rag.config import Settings
 from ultralight_rag.pipeline.chunking import BaseChunker
 from ultralight_rag.pipeline.embeddings import BaseEmbedder
 from ultralight_rag.service import RAGService
 from ultralight_rag.storage.sqlite import SQLiteStore
+
+# `testserver` is the Host that Starlette's TestClient sends. It is test
+# scaffolding, not a host any deployment serves, so it is deliberately absent
+# from the shipped `trusted_hosts` default -- otherwise every production
+# instance would ship an allowlist entry for it. Tests that drive the app
+# through TestClient must therefore opt in explicitly, which `app_settings`
+# does. Tests that only exercise the service or store layer never reach
+# TrustedHostMiddleware and can keep using `Settings` directly.
+TEST_TRUSTED_HOSTS = ("localhost", "127.0.0.1", "testserver")
+
+
+def app_settings(**overrides) -> Settings:
+    """Settings for tests that drive a FastAPI app through TestClient."""
+    overrides.setdefault("trusted_hosts", TEST_TRUSTED_HOSTS)
+    return Settings(**overrides)
 
 
 class KeywordEmbedder(BaseEmbedder):
@@ -66,4 +82,4 @@ def _close_sqlite_stores_opened_during_test(monkeypatch):
 
 @pytest.fixture
 def service():
-    return RAGService(SQLiteStore(), KeywordEmbedder(), FixedChunker())
+    return RAGService(SQLiteStore(), KeywordEmbedder(), FixedChunker(), app_settings())
