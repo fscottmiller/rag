@@ -54,8 +54,15 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # ruff is pinned in the `dev` dependency group (pyproject.toml) and run
+      # via `uv run`, matching the typecheck-mcp-server job's mypy invocation
+      # below, so a new ruff release can't redden CI on a commit that changed
+      # nothing and a local `uv run ruff ...` reproduces CI exactly.
       - name: Run lint and format checks
-        run: uvx ruff check . && uvx ruff format --check .
+        run: uv run ruff check . && uv run ruff format --check .
 
   typecheck-mcp-server:
     runs-on: ubuntu-latest

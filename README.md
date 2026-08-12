@@ -193,6 +193,7 @@ GitHub Actions runs the following on every push and pull request, in parallel jo
 | --- | --- |
 | `test` | Tests + coverage gate, matrixed across Python 3.11, 3.12, 3.13. |
 | `lint` | `ruff check` and `ruff format --check`. |
+| `typecheck-mcp-server` | `mypy` against `src/ultralight_rag/mcp_server/`. |
 | `lockfile` | `uv lock --check` -- fails if `uv.lock` is out of sync with `pyproject.toml`. |
 | `dependency-audit` | `pip-audit` against the resolved dependency set -- fails on known CVEs in any dependency, direct or transitive. |
 | `build-and-import` | Builds the wheel, installs *that artifact* into a clean virtualenv, and imports it -- catches packaging mistakes that `uv sync`'s editable install would never see. |
