@@ -450,3 +450,37 @@ def test_auth_logs_missing_trusted_proxy_identity(service, caplog):
     assert response.status_code == 401
     logged = " ".join(record.getMessage() for record in caplog.records)
     assert "identity" in logged.lower(), f"missing-identity denial not logged: {logged!r}"
+
+
+def test_rest_logs_cross_origin_write_rejection(service, caplog):
+    """Regression test for #50's review: the cross-origin Origin check in
+    `require()` rejects the write before `Authorizer.authorize` ever runs, so
+    unlike every other authorization denial it previously left no server-side
+    trace. A live cross-origin write attempt (e.g. CSRF riding the proxy's
+    ambient session cookie in trusted-proxy mode) must still be logged.
+    """
+    from dataclasses import replace
+
+    protected = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, auth_mode="trusted-proxy"),
+    )
+    client = TestClient(create_app(protected))
+
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
+        response = client.post(
+            "/documents",
+            data={"title": "Injected", "content": "cross-origin"},
+            headers={
+                protected.settings.proxy_user_header: "admin@example.test",
+                protected.settings.proxy_role_header: "admin",
+                "Origin": "https://evil.example",
+            },
+        )
+
+    assert response.status_code == 403
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "evil.example" in logged
+    assert "write" in logged

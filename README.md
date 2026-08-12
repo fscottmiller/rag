@@ -127,7 +127,9 @@ uv run python -m ultralight_rag.mcp_server.server
 
 ## Authentication and authorization
 
-The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. REST rejects cross-origin browser mutations even in open mode to prevent malicious webpages from posting to a local instance. The REST host must also be in `RAG_TRUSTED_HOSTS`, which prevents DNS-rebinding requests from bypassing that protection. Use this mode only on a trusted local network.
+The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. Use this mode only on a trusted local network.
+
+REST rejects cross-origin browser mutations in both `none` and `trusted-proxy` mode -- in `none` mode this stops a malicious webpage from posting to a local instance directly, and in `trusted-proxy` mode it stops the same webpage from riding the browser's ambient, proxy-authenticated session cookie through a write that a preflight would otherwise have blocked. The REST host must also be in `RAG_TRUSTED_HOSTS`, which prevents DNS-rebinding requests from bypassing that protection.
 
 For a deployment behind an authenticating reverse proxy or Cloudflare Access tunnel, set `RAG_AUTH_MODE=trusted-proxy`. The application trusts the proxy to authenticate the request and to overwrite the configured identity and role headers:
 
@@ -141,6 +143,8 @@ uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.
+
+Because trusted-proxy mode is always deployed behind a proxy, the cross-origin check above now requires a browser client to be served from the same origin as the API (same scheme, host, and port) -- a real breaking change for anyone currently serving a single-page app from a different origin than the API. The check works by comparing the browser's `Origin` header against the request URL FastAPI itself sees, not whatever's in the browser's address bar, so the proxy must preserve the original `Host` header and send `X-Forwarded-Proto` set to the scheme the browser actually used; a TLS-terminating proxy that doesn't will leave uvicorn seeing `http` while the browser sent `https`, which 403s legitimate same-origin writes. Uvicorn only honors `X-Forwarded-Proto` when the proxy's address is covered by `--forwarded-allow-ips` (default: loopback only), so start uvicorn with `--forwarded-allow-ips <proxy-ip>` whenever the proxy is not itself on loopback -- and note that uvicorn does not honor `X-Forwarded-Host` at all, so the `Host` header must already be correct by the time the request reaches it. This is a real operator responsibility, not an assumption the code makes on your behalf; a `RAG_PUBLIC_ORIGIN` setting that would let the application state its external origin explicitly, instead of relying on request/proxy headers, is tracked as a follow-up rather than fixed here.
 
 ## Configuration
 

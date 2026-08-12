@@ -96,6 +96,7 @@ def test_rest_rejects_cross_origin_mutations_in_trusted_proxy_mode(service):
         headers=admin_headers,
     )
     assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-origin document mutations are not allowed"
     assert protected_service.list_documents() == []
 
 

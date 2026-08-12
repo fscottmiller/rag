@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,6 +19,8 @@ from ..pipeline.embeddings import EmbeddingProviderResponseError, EmbeddingProvi
 from ..service import DocumentTooLargeError, RAGService
 from ..storage.sqlite import DocumentNotFoundError
 from .models import DocumentPayload, SearchPayload
+
+logger = logging.getLogger(__name__)
 
 # Generic, client-safe messages for embedding-provider failures (finding F12).
 # The real detail -- upstream response bodies, hostnames, quota text -- is
@@ -129,14 +132,31 @@ def create_app(
     def require(request: Request, action: str) -> None:
         # Origin check runs for every write in every auth mode, not just "none".
         # In trusted-proxy mode the browser still carries the proxy's ambient
-        # session cookie; POST /documents is a CORS-simple request (no
-        # preflight), so without this check a cross-origin page could trigger
-        # a write and have the proxy authenticate it on the visitor's behalf.
+        # session cookie; POST /documents is CORS-simple -- and so unpreflighted
+        # -- only for a multipart/form-data (or urlencoded/text-plain) body, so
+        # without this check a cross-origin page sending one of those content
+        # types could trigger a write and have the proxy authenticate it on the
+        # visitor's behalf. The application/json path was always preflighted
+        # and was never the hole this check closes.
         # Requests with no Origin header (non-browser callers) are unaffected.
         if action == "write":
             origin = request.headers.get("origin")
             if origin:
                 if not _same_origin(origin, request):
+                    # This rejection happens before Authorizer.authorize runs, so
+                    # without a log line here a live cross-origin write attempt
+                    # (e.g. a CSRF-style attack riding the proxy's ambient
+                    # session cookie) would leave no server-side trace at all --
+                    # unlike every other authorization denial. origin is
+                    # attacker-controlled and unescaped by anything upstream, so
+                    # it is run through Authorizer._escape before logging, the
+                    # same control-character defense used for the proxy user/role
+                    # headers in Authorizer.authorize.
+                    logger.warning(
+                        "Authorization denied: cross-origin write rejected, origin=%s action=%s",
+                        Authorizer._escape(origin),
+                        action,
+                    )
                     raise HTTPException(
                         status_code=403,
                         detail="Cross-origin document mutations are not allowed",
