@@ -55,10 +55,12 @@ _ALLOWED_TRANSPORTS = {"stdio", "streamable-http"}
 #     and the emitted `outputSchema` is still derived from `T`, byte-for-byte.
 if TYPE_CHECKING:
     SearchResult = CallToolResult | list[dict[str, Any]]
+    DocumentListResult = CallToolResult | list[dict[str, Any]]
     DocumentResult = CallToolResult | dict[str, Any]
     DeleteResult = CallToolResult | dict[str, str]
 else:
     SearchResult = Annotated[CallToolResult, list[dict[str, Any]]]
+    DocumentListResult = Annotated[CallToolResult, list[dict[str, Any]]]
     DocumentResult = Annotated[CallToolResult, dict[str, Any]]
     DeleteResult = Annotated[CallToolResult, dict[str, str]]
 
@@ -165,7 +167,7 @@ def create_mcp(
             return provider_failure(exc, denied_content={"result": []})
 
     @server.tool()
-    async def list_documents(*, ctx: Context) -> SearchResult:
+    async def list_documents(*, ctx: Context) -> DocumentListResult:
         """List documents currently held in the index."""
         if denial := authorize(ctx, "read", denied_content={"result": []}):
             return denial

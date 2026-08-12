@@ -37,12 +37,29 @@ def test_embedder_factory_supports_provider_aliases():
     ollama_embedder = create_embedder("ollama", "model", "http://ollama/v1/embeddings")
     assert isinstance(ollama_embedder, OpenAICompatibleEmbedder)
     assert ollama_embedder.url == "http://ollama/v1/embeddings"
+    # Pins embedding_batch_size flowing through to the embedder's batch_size for the
+    # ollama branch, keyword-passed.
+    assert (
+        create_embedder("ollama", "m", "http://o/v1/embeddings", embedding_batch_size=7).batch_size
+        == 7
+    )
     openai_embedder = create_embedder(
         "openai_compatible", "model", "https://embedding.test/v1/embeddings", "secret", 5, 768
     )
     assert isinstance(openai_embedder, OpenAICompatibleEmbedder)
     assert openai_embedder.url == "https://embedding.test/v1/embeddings"
     assert openai_embedder.dimensions == 768
+    # Regression guard: create_embedder's OpenAICompatibleEmbedder(...) calls pass seven
+    # positional args, and dimensions/batch_size are adjacent ints. Passing all args
+    # positionally here (as create_embedder itself does internally) is what pins each
+    # value to the right constructor slot -- if dimensions and batch_size were ever
+    # transposed in create_embedder, this would fail while every other test here,
+    # which only checks one of the two, would keep passing.
+    transposition_check = create_embedder(
+        "openai_compatible", "m", "https://e.test/v1/embeddings", "secret", 5, 768, 7
+    )
+    assert transposition_check.dimensions == 768
+    assert transposition_check.batch_size == 7
     with pytest.raises(ValueError, match="API key"):
         create_embedder("openai-compatible", "model")
     with pytest.raises(ValueError, match="https"):
@@ -133,6 +150,40 @@ def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypa
 
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
     embedder = FastEmbedEmbedder("test-model")
+
+    def embed():
+        start.wait()
+        assert embedder.embed(["text"]) == [[1.0]]
+
+    threads = [threading.Thread(target=embed) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
+    assert constructed == ["test-model"]
+
+
+def test_sentence_transformer_constructs_its_model_once_under_concurrent_first_use(
+    monkeypatch,
+):
+    constructed = []
+    start = threading.Barrier(3)
+
+    class Model:
+        def encode(self, inputs, convert_to_numpy=True):
+            return SimpleNamespace(tolist=lambda: [[1.0] for _ in inputs])
+
+    def build(name):
+        constructed.append(name)
+        time.sleep(0.01)
+        return Model()
+
+    monkeypatch.setitem(
+        sys.modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=build)
+    )
+    embedder = SentenceTransformerEmbedder("test-model")
 
     def embed():
         start.wait()

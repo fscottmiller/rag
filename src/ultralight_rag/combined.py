@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
@@ -36,7 +37,17 @@ class MCPOriginMiddleware:
 
 def create_combined_app(service: RAGService | None = None) -> FastAPI:
     """Create one REST app and streamable HTTP MCP adapter over one service."""
-    rag = service or RAGService()
+    # Only a service we construct ourselves is ours to close. A caller who
+    # injects `service` still holds that reference and may reuse it (across
+    # tests, across other app instances, ...) after this app shuts down, so
+    # closing its store out from under them would be a surprise, not a favor.
+    owns_store = service is None
+    # `service if service is not None` rather than `service or`: ownership is
+    # decided by identity just above, so construction must test the same thing.
+    # RAGService defines neither __bool__ nor __len__, so the two agree today --
+    # but if that ever changed, `or` would build a fresh service for a falsy
+    # injected one while owns_store stayed False, leaking that store silently.
+    rag = service if service is not None else RAGService()
     mcp_path = os.getenv("MCP_PATH", "/mcp")
     mcp = create_mcp(
         rag,
@@ -49,8 +60,19 @@ def create_combined_app(service: RAGService | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        async with mcp.session_manager.run():
-            yield
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            # The `finally` (rather than code after the `async with`) makes
+            # this run even if the session manager's startup or shutdown
+            # raises, and only after its own `__aexit__` has completed, so
+            # the store outlives every session the manager was still
+            # servicing. `SQLiteStore.close()` is idempotent, which keeps
+            # this safe alongside the autouse store-closing fixture in
+            # tests/conftest.py.
+            if owns_store:
+                rag.store.close()
 
     app = create_app(rag, lifespan=lifespan)
     app.mount(mcp_path, MCPOriginMiddleware(mcp_http))
@@ -58,4 +80,23 @@ def create_combined_app(service: RAGService | None = None) -> FastAPI:
     return app
 
 
-app = create_combined_app()
+# Lazy singleton, mirroring api/main.py's get_app()/__getattr__ and
+# mcp_server/server.py's get_mcp()/__getattr__: a bare `import
+# ultralight_rag.combined` must not open a SQLite connection or construct an
+# embedder. `app` is only realized on first attribute access, which is what
+# `uvicorn ultralight_rag.combined:app` (and anything else naming `.app`)
+# triggers.
+_default_app: FastAPI | None = None
+
+
+def get_app() -> FastAPI:
+    global _default_app
+    if _default_app is None:
+        _default_app = create_combined_app()
+    return _default_app
+
+
+def __getattr__(name: str) -> Any:
+    if name == "app":
+        return get_app()
+    raise AttributeError(name)

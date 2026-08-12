@@ -90,7 +90,7 @@ Available endpoints:
 
 ## Logging
 
-The library uses the standard `logging` module (`logging.getLogger(__name__)` per module) and never configures handlers, levels, or `logging.basicConfig` itself -- that is the embedding application's responsibility. At minimum it logs, server-side only: embedding-provider failures (with upstream detail, truncated to 500 bytes, at `WARNING`/`ERROR`); authorization denials in `trusted-proxy` mode, identified by principal and attempted action; document ingest/update/delete, identified by document id; and search, identified by `top_k` and result count (a search is not scoped to one document, so no id applies). It never logs the embedding API key, document content, or chunk text -- `Settings.embedding_api_key` is `repr=False` for the same reason.
+The library uses the standard `logging` module (`logging.getLogger(__name__)` per module) and never configures handlers, levels, or `logging.basicConfig` itself -- that is the embedding application's responsibility. At minimum it logs, server-side only: embedding-provider failures (with upstream detail, truncated to 500 bytes, at `WARNING`/`ERROR`); authorization denials in `trusted-proxy` mode, identified by principal and attempted action; cross-origin write rejections in every auth mode, identified by origin and attempted action (the origin is escaped before interpolation, since it is attacker-controlled); document ingest/update/delete, identified by document id; and search, identified by `top_k` and result count (a search is not scoped to one document, so no id applies). It never logs the embedding API key, document content, or chunk text -- `Settings.embedding_api_key` is `repr=False` for the same reason.
 
 ## MCP
 
@@ -127,7 +127,9 @@ uv run python -m ultralight_rag.mcp_server.server
 
 ## Authentication and authorization
 
-The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. REST rejects cross-origin browser mutations even in open mode to prevent malicious webpages from posting to a local instance. The REST host must also be in `RAG_TRUSTED_HOSTS`, which prevents DNS-rebinding requests from bypassing that protection. Use this mode only on a trusted local network.
+The default runtime mode is `RAG_AUTH_MODE=none`: REST and MCP requests are unauthenticated, and non-browser callers can read, search, upload, update, and delete documents. Use this mode only on a trusted local network.
+
+REST rejects cross-origin browser mutations in both `none` and `trusted-proxy` mode -- in `none` mode this stops a malicious webpage from posting to a local instance directly, and in `trusted-proxy` mode it stops the same webpage from riding the browser's ambient, proxy-authenticated session cookie through a write that a preflight would otherwise have blocked. The REST host must also be in `RAG_TRUSTED_HOSTS`, which prevents DNS-rebinding requests from bypassing that protection.
 
 For a deployment behind an authenticating reverse proxy or Cloudflare Access tunnel, set `RAG_AUTH_MODE=trusted-proxy`. The application trusts the proxy to authenticate the request and to overwrite the configured identity and role headers:
 
@@ -141,6 +143,8 @@ uv run uvicorn ultralight_rag.combined:app --host 127.0.0.1 --port 8001
 ```
 
 Configure the proxy to strip client-supplied versions of these headers and set them only after successful authentication. Do not expose the application directly in trusted-proxy mode: it does not validate proxy credentials itself. The `admin` role can perform every operation. The `reader` role can list and retrieve documents and run searches, but cannot upload, update, or delete documents. The same policy applies to MCP tools over streamable HTTP; stdio is intended for local use.
+
+Because trusted-proxy mode is always deployed behind a proxy, the cross-origin check above now requires a browser client to be served from the same origin as the API (same scheme, host, and port). What this breaks is narrower than it first sounds: the service installs no CORS middleware and never has, so a page on another origin could not read a response body before this change either. Cross-origin *writes* that ignored their response used to succeed and now return 403. The check works by comparing the browser's `Origin` header against the request URL FastAPI itself sees, not whatever's in the browser's address bar, so the proxy must preserve the original `Host` header and send `X-Forwarded-Proto` set to the scheme the browser actually used; a TLS-terminating proxy that doesn't will leave uvicorn seeing `http` while the browser sent `https`, which 403s legitimate same-origin writes. Uvicorn only honors `X-Forwarded-Proto` when the proxy's address is covered by `--forwarded-allow-ips` (default: loopback only), so start uvicorn with `--forwarded-allow-ips <proxy-ip>` whenever the proxy is not itself on loopback -- and note that uvicorn does not honor `X-Forwarded-Host` at all, so the `Host` header must already be correct by the time the request reaches it. This is a real operator responsibility, not an assumption the code makes on your behalf; a `RAG_PUBLIC_ORIGIN` setting that would let the application state its external origin explicitly, instead of relying on request/proxy headers, is tracked as a follow-up rather than fixed here.
 
 ## Configuration
 
@@ -162,7 +166,7 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks; recursive chunking prepends the prior chunk's trailing characters. |
 | `RAG_MAX_DOCUMENT_BYTES` | `10485760` | Maximum document content size accepted by REST after parsing. |
 | `RAG_MAX_REQUEST_BYTES` | `10551296` | Maximum raw HTTP request body accepted before parsing; keep this at or above the document limit to allow request overhead. |
-| `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
+| `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
 | `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
 | `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. Only used by the standalone `ultralight_rag.mcp_server.server` process, not the combined app. |
 | `MCP_HOST` | `127.0.0.1` | Bind host for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--host` instead. |
@@ -189,6 +193,7 @@ GitHub Actions runs the following on every push and pull request, in parallel jo
 | --- | --- |
 | `test` | Tests + coverage gate, matrixed across Python 3.11, 3.12, 3.13. |
 | `lint` | `ruff check` and `ruff format --check`. |
+| `typecheck-mcp-server` | `mypy` against `src/ultralight_rag/mcp_server/`. |
 | `lockfile` | `uv lock --check` -- fails if `uv.lock` is out of sync with `pyproject.toml`. |
 | `dependency-audit` | `pip-audit` against the resolved dependency set -- fails on known CVEs in any dependency, direct or transitive. |
 | `build-and-import` | Builds the wheel, installs *that artifact* into a clean virtualenv, and imports it -- catches packaging mistakes that `uv sync`'s editable install would never see. |

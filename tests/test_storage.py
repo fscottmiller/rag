@@ -54,6 +54,57 @@ def test_create_schema_reraises_other_operational_errors():
             SQLiteStore()
 
 
+def test_document_exists_is_a_cheap_probe_that_does_not_load_content_or_chunks():
+    store = SQLiteStore()
+    created = store.create_document(
+        Document(
+            title="Guide",
+            content="full text",
+            metadata={},
+            chunks=["first", "second"],
+            embeddings=[[1.0, 0.0], [0.0, 1.0]],
+        ),
+        document_id="doc-1",
+    )
+    assert store.document_exists(created["id"]) is True
+    assert store.document_exists("missing") is False
+    store.close()
+
+
+def test_get_document_runs_exactly_two_queries_not_three():
+    # get_document used to run a document-row query, a COUNT(*) for chunk_count,
+    # and then a full chunk select -- even though len(chunks) already answers the
+    # count. Pin it down to the document-row query plus the chunk select only.
+    store = SQLiteStore()
+    store.create_document(
+        Document(
+            title="Guide",
+            content="text",
+            metadata={},
+            chunks=["first", "second"],
+            embeddings=[[1.0], [2.0]],
+        ),
+        document_id="doc-1",
+    )
+    queries = []
+    try:
+        store.connection.set_trace_callback(queries.append)
+        document = store.get_document("doc-1")
+    finally:
+        store.connection.set_trace_callback(None)
+        store.close()
+    assert document["chunk_count"] == 2
+    assert not any("COUNT" in query for query in queries)
+    # Names the two statements get_document is expected to run (document row, then
+    # chunks), rather than bare-counting them: a future legitimate query added to
+    # get_document would break a bare `len(queries) == 2` for the wrong reason, while
+    # naming the tables keeps the COUNT-elimination assertion above load-bearing.
+    queried_tables = [
+        table for query in queries for table in ("documents", "chunks") if f"FROM {table}" in query
+    ]
+    assert queried_tables == ["documents", "chunks"]
+
+
 def test_storage_round_trip_and_chunk_metadata():
     store = SQLiteStore()
     created = store.create_document(

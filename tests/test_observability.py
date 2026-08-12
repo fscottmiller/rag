@@ -25,6 +25,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -450,3 +451,128 @@ def test_auth_logs_missing_trusted_proxy_identity(service, caplog):
     assert response.status_code == 401
     logged = " ".join(record.getMessage() for record in caplog.records)
     assert "identity" in logged.lower(), f"missing-identity denial not logged: {logged!r}"
+
+
+def test_rest_logs_cross_origin_write_rejection(service, caplog):
+    """Regression test for #50's review: the cross-origin Origin check in
+    `require()` rejects the write before `Authorizer.authorize` ever runs, so
+    unlike every other authorization denial it previously left no server-side
+    trace. A live cross-origin write attempt (e.g. CSRF riding the proxy's
+    ambient session cookie in trusted-proxy mode) must still be logged.
+    """
+    from dataclasses import replace
+
+    protected = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, auth_mode="trusted-proxy"),
+    )
+    client = TestClient(create_app(protected))
+
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
+        response = client.post(
+            "/documents",
+            data={"title": "Injected", "content": "cross-origin"},
+            headers={
+                protected.settings.proxy_user_header: "admin@example.test",
+                protected.settings.proxy_role_header: "admin",
+                "Origin": "https://evil.example",
+            },
+        )
+
+    assert response.status_code == 403
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "evil.example" in logged
+    assert "write" in logged
+
+
+async def _drive_app_with_raw_headers(app: Any, headers: list[tuple[bytes, bytes]]) -> int:
+    """POST /documents directly against the ASGI app with a hand-built scope,
+    bypassing TestClient/httpx entirely.
+
+    httpx's own Headers validation rejects a header value containing a raw
+    newline before the request is ever sent, so a real control-character probe
+    -- as opposed to one httpx has already percent-escaped or refused -- must
+    be delivered below that layer. `require()`'s Origin check runs before any
+    body parsing, so an empty body is enough to reach it.
+    """
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/documents",
+        "raw_path": b"/documents",
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers,
+        "client": ("testclient", 123),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+    sent_body = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal sent_body
+        if sent_body:
+            return {"type": "http.disconnect"}
+        sent_body = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    status_holder: dict[str, int] = {}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            status_holder["status"] = message["status"]
+
+    await app(scope, receive, send)
+    return status_holder["status"]
+
+
+async def test_rest_escapes_cross_origin_write_rejection_log(service, caplog):
+    """Regression test for #50 round-2 review: `test_rest_logs_cross_origin_write_rejection`
+    above proves the origin is logged, but not that it is escaped -- deleting the
+    `Authorizer._escape(origin)` call there and logging the raw origin instead
+    left that test green. This drives the same rejection path with an origin
+    containing a real newline and a fake, well-formed WARNING record, mirroring
+    `test_auth_denial_cannot_forge_a_log_line`'s probe against `Authorizer.authorize`.
+    """
+    from dataclasses import replace
+
+    protected = RAGService(
+        service.store,
+        service.embedder,
+        service.chunker,
+        replace(service.settings, auth_mode="trusted-proxy"),
+    )
+    app = create_app(protected)
+
+    forged_origin = (
+        "https://evil.example\n2099-01-01 00:00:00 WARNING ultralight_rag.api.main: "
+        "FORGED: Authorization denied: cross-origin write rejected, origin=trusted.example "
+        "action=write -- ALLOWED"
+    )
+    assert "\n" in forged_origin, "the probe must carry a real newline, not an escaped one"
+
+    headers = [
+        (b"host", b"testserver"),
+        (protected.settings.proxy_user_header.lower().encode(), b"admin@example.test"),
+        (protected.settings.proxy_role_header.lower().encode(), b"admin"),
+        (b"origin", forged_origin.encode("latin-1")),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="ultralight_rag"):
+        status = await _drive_app_with_raw_headers(app, headers)
+
+    assert status == 403
+    assert caplog.records, "the cross-origin denial must be logged at all"
+    for record in caplog.records:
+        assert "\n" not in record.getMessage(), (
+            "a raw newline reached the log record, so the Origin header can forge log lines"
+        )
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "FORGED" in logged, "detail must still be logged, just escaped"
+    assert "write" in logged

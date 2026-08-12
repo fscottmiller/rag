@@ -1,3 +1,6 @@
+import sqlite3
+import subprocess
+import sys
 from dataclasses import replace
 
 import pytest
@@ -26,6 +29,65 @@ def test_combined_import_does_not_create_an_unused_rest_app():
     assert api_main._default_app is None
     assert api_main.app is api_main.get_app()
     assert api.app is api_main.get_app()
+
+
+def test_combined_bare_import_does_not_construct_a_service():
+    """A bare `import ultralight_rag.combined` must stay side-effect-free.
+
+    `create_combined_app()` opens a SQLite connection and constructs an
+    embedder, so running it eagerly at module scope -- the historical bug
+    this guards against -- would mean import alone (a test collecting this
+    module, a docs build, `--help`) pays that cost. Checked from a fresh
+    subprocess rather than in-process: by the time this test runs, other
+    tests in this module have already called `create_combined_app` many
+    times over, and pytest-randomly may reorder collection, so nothing about
+    in-process module state before or after those calls would reliably
+    isolate "did the bare import itself construct anything."
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            # Assert the side effect, not just the sentinel. `_default_app is
+            # None` alone passes even with the historical bug restored, because
+            # a module-scope `app = create_combined_app()` binds `app` directly
+            # and never touches the lazy singleton -- so the connection and the
+            # embedder are built while the sentinel still reads None. The
+            # sqlite3.connect spy catches the cost itself, and the vars() check
+            # catches the eager binding: __getattr__ only fires for names absent
+            # from the module dict, so `'app' not in vars(...)` is exactly the
+            # laziness invariant.
+            "import sqlite3\n"
+            "_connect, opened = sqlite3.connect, []\n"
+            "sqlite3.connect = lambda *a, **k: (opened.append(a), _connect(*a, **k))[1]\n"
+            "import ultralight_rag.combined as combined\n"
+            "assert not opened, f'bare import opened a database: {opened}'\n"
+            "assert 'app' not in vars(combined), 'bare import bound app eagerly'\n"
+            "assert combined._default_app is None, 'bare import realized the lazy app'\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_combined_app_attribute_lazily_realizes_the_singleton():
+    import ultralight_rag.combined as combined
+
+    combined._default_app = None
+    try:
+        assert combined.app is combined.get_app()
+        assert combined.app is combined._default_app
+    finally:
+        combined._default_app = None
+
+
+def test_combined_getattr_rejects_unknown_names():
+    import ultralight_rag.combined as combined
+
+    with pytest.raises(AttributeError):
+        _ = combined.not_a_real_attribute
 
 
 @pytest.mark.asyncio
@@ -168,6 +230,29 @@ def test_combined_app_mounts_streamable_http_over_the_same_service(service):
         assert response.status_code == 200
         assert response.headers["mcp-session-id"]
         assert '"serverInfo"' in response.text
+
+
+def test_combined_lifespan_closes_the_store_it_constructed():
+    """A `create_combined_app()` with no injected service owns the `RAGService`
+    it builds internally, so its store should not outlive the app.
+    """
+    app = create_combined_app()
+    store = app.state.rag.store
+    with TestClient(app):
+        store.connection.execute("SELECT 1")  # still open while the app is up
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.connection.execute("SELECT 1")
+
+
+def test_combined_lifespan_leaves_an_injected_service_store_open(service):
+    """A caller who injects `service` still holds that reference and may
+    reuse it after this app shuts down, so the lifespan must not close a
+    store it does not own.
+    """
+    app = create_combined_app(service)
+    with TestClient(app):
+        pass
+    service.store.connection.execute("SELECT 1")  # still open after shutdown
 
 
 def test_mcp_accepts_trusted_host_with_nondefault_port(service):

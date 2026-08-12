@@ -14,7 +14,10 @@ def test_settings_defaults_are_in_memory_and_fastembed():
     assert settings.max_document_bytes == 10 * 1024 * 1024
     assert settings.max_request_bytes == 10 * 1024 * 1024 + 64 * 1024
     assert settings.embedding_batch_size == 64
-    assert settings.trusted_hosts == ("localhost", "127.0.0.1", "testserver")
+    # `testserver` is TestClient scaffolding, not a host any deployment serves,
+    # so it must not ship in the default allowlist. Tests that drive the app
+    # opt in via conftest's `app_settings`.
+    assert settings.trusted_hosts == ("localhost", "127.0.0.1")
 
 
 def test_settings_read_all_environment_values(monkeypatch):
@@ -143,3 +146,45 @@ def test_settings_reject_non_integer_chunk_configuration(monkeypatch):
     monkeypatch.setenv("RAG_CHUNK_SIZE", "not-an-integer")
     with pytest.raises(ValueError):
         Settings.from_env()
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "url"),
+    [
+        ("ollama", "nomic-embed-text", "http://localhost:11434/v1/embeddings"),
+        ("sentence-transformers", "all-MiniLM-L6-v2", "https://api.openai.com/v1/embeddings"),
+        ("openai-compatible", "text-embedding-3-small", "https://api.openai.com/v1/embeddings"),
+        ("fastembed", "BAAI/bge-small-en-v1.5", "https://api.openai.com/v1/embeddings"),
+        # Aliases and casing fold onto the canonical entry rather than needing
+        # their own duplicated rows in PROVIDER_DEFAULTS.
+        ("openai", "text-embedding-3-small", "https://api.openai.com/v1/embeddings"),
+        ("OpenAI_Compatible", "text-embedding-3-small", "https://api.openai.com/v1/embeddings"),
+        ("openai-compatible-api", "text-embedding-3-small", "https://api.openai.com/v1/embeddings"),
+    ],
+)
+def test_settings_resolves_provider_defaults_without_the_environment(provider, model, url):
+    # Constructing Settings directly used to keep the hardcoded field defaults
+    # (FastEmbed's model, OpenAI's URL) whatever the provider was, because the
+    # provider->default mapping lived only in from_env(). Settings(
+    # embedding_provider="ollama") therefore built an OpenAI-compatible embedder
+    # pointed at api.openai.com carrying a FastEmbed model name, with nothing
+    # validating the mismatch. Both construction paths now resolve identically.
+    settings = Settings(embedding_provider=provider)
+    assert (settings.embedding_model, settings.embedding_url) == (model, url)
+
+
+def test_explicit_model_and_url_win_over_provider_defaults():
+    settings = Settings(
+        embedding_provider="ollama",
+        embedding_model="custom-model",
+        embedding_url="http://elsewhere.test/v1/embeddings",
+    )
+    assert settings.embedding_model == "custom-model"
+    assert settings.embedding_url == "http://elsewhere.test/v1/embeddings"
+
+
+def test_unknown_provider_falls_back_without_raising():
+    # create_embedder is what rejects an unknown provider; Settings only has to
+    # stay constructible long enough to reach that error.
+    settings = Settings(embedding_provider="not-a-real-provider")
+    assert settings.embedding_model == "all-MiniLM-L6-v2"

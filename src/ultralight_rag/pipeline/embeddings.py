@@ -140,7 +140,14 @@ def _validated_embeddings(vectors: list[object], expected_count: int) -> list[li
 class BaseEmbedder(ABC):
     @abstractmethod
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embed a sequence of texts."""
+        """Embed a sequence of texts.
+
+        Implementations receive every chunk of a document (or the single-item
+        list from ``embed_one``) in one call; the caller does not pre-slice
+        ``texts``. An implementation backed by a provider with a request size
+        limit is responsible for splitting ``texts`` into batches itself, the
+        way ``OpenAICompatibleEmbedder`` slices by ``self.batch_size``.
+        """
 
     def embed_one(self, text: str) -> list[float]:
         return self.embed([text])[0]
@@ -152,13 +159,16 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             raise ValueError("embedding model must not be empty")
         self.model_name = model_name
         self._model = None
+        self._model_lock = Lock()
 
     @property
     def model(self):
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            with self._model_lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name)
+                    self._model = SentenceTransformer(self.model_name)
         return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:

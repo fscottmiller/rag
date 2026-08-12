@@ -91,7 +91,13 @@ def test_update_checks_document_existence_before_embedding(service):
     assert embedder.calls == 0
 
 
-def test_ingestion_batches_embedding_requests(service):
+def test_service_no_longer_batches_before_calling_the_embedder(service):
+    # Batching by RAG_EMBEDDING_BATCH_SIZE is now solely the embedder's job (see
+    # test_openai_compatible_embedder_sends_batch_and_preserves_indexes in
+    # test_embeddings.py for the actual bounded-request guarantee). The service no
+    # longer slices chunks itself, so a plain embedder without its own batching sees
+    # every chunk from one _prepare call in a single embed() invocation -- not one
+    # call per embedding_batch_size-sized group as before.
     class BatchCountingEmbedder:
         def __init__(self):
             self.batch_sizes = []
@@ -108,7 +114,7 @@ def test_ingestion_batches_embedding_requests(service):
         Settings(embedding_batch_size=2),
     )
     configured.ingest("Batched", "one|two|three")
-    assert embedder.batch_sizes == [2, 1]
+    assert embedder.batch_sizes == [3]
 
 
 def test_service_enforces_document_limit(service):
