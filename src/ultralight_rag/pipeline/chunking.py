@@ -12,7 +12,8 @@ class BaseChunker(ABC):
 
 
 def _chunk_text(result: Any) -> str:
-    return getattr(result, "text", str(result)).strip()
+    text = getattr(result, "text", None)
+    return text if text is not None else str(result)
 
 
 @dataclass
@@ -52,7 +53,12 @@ class ChonkieChunker(BaseChunker):
         for item in results:
             start = getattr(item, "start_index", None)
             end = getattr(item, "end_index", None)
-            if self.strategy.lower() == "recursive" and self.chunk_overlap and start is not None:
+            if (
+                self.strategy.lower() == "recursive"
+                and self.chunk_overlap
+                and start is not None
+                and end is not None
+            ):
                 piece = text[max(0, int(start) - self.chunk_overlap) : int(end)]
             else:
                 piece = _chunk_text(item)

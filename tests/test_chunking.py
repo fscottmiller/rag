@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from ultralight_rag.pipeline.chunking import ChonkieChunker
@@ -23,6 +25,16 @@ def test_recursive_chunker_applies_configured_overlap():
     assert len(without_overlap) == len(with_overlap)
     assert with_overlap[1].startswith(without_overlap[0][-5:])
     assert with_overlap != without_overlap
+
+
+def test_recursive_chunker_falls_back_when_end_index_missing(monkeypatch):
+    # Stub chunk result exposes start_index but not end_index, mirroring a
+    # Chonkie result shape the code must not assume is always fully populated.
+    chunker = ChonkieChunker(strategy="recursive", chunk_size=20, chunk_overlap=5)
+    stub_result = SimpleNamespace(start_index=0, text="stubbed chunk text")
+    monkeypatch.setattr(chunker, "_chunker", SimpleNamespace(chunk=lambda text: [stub_result]))
+
+    assert chunker.chunk("irrelevant input") == ["stubbed chunk text"]
 
 
 def test_chunker_rejects_invalid_configuration():
