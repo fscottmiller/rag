@@ -1,8 +1,11 @@
 """Chonkie-backed chunking with a small stable interface."""
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class BaseChunker(ABC):
@@ -13,7 +16,7 @@ class BaseChunker(ABC):
 
 def _chunk_text(result: Any) -> str:
     text = getattr(result, "text", None)
-    return text if text is not None else str(result)
+    return text if isinstance(text, str) else str(result)
 
 
 @dataclass
@@ -49,18 +52,23 @@ class ChonkieChunker(BaseChunker):
         if not text.strip():
             return []
         results = self._chunker.chunk(text)
+        is_recursive_with_overlap = self.strategy.lower() == "recursive" and self.chunk_overlap
+        warned_missing_index = False
         chunks = []
         for item in results:
             start = getattr(item, "start_index", None)
             end = getattr(item, "end_index", None)
-            if (
-                self.strategy.lower() == "recursive"
-                and self.chunk_overlap
-                and start is not None
-                and end is not None
-            ):
+            if is_recursive_with_overlap and start is not None and end is not None:
                 piece = text[max(0, int(start) - self.chunk_overlap) : int(end)]
             else:
+                if is_recursive_with_overlap and not warned_missing_index:
+                    logger.warning(
+                        "Recursive chunker result missing start_index/end_index; "
+                        "falling back to unextended chunk text and skipping the "
+                        "configured overlap for this and any further affected "
+                        "chunks in this call (ADR-003)."
+                    )
+                    warned_missing_index = True
                 piece = _chunk_text(item)
             piece = piece.strip()
             if piece:

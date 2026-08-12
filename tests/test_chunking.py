@@ -27,14 +27,77 @@ def test_recursive_chunker_applies_configured_overlap():
     assert with_overlap != without_overlap
 
 
-def test_recursive_chunker_falls_back_when_end_index_missing(monkeypatch):
-    # Stub chunk result exposes start_index but not end_index, mirroring a
-    # Chonkie result shape the code must not assume is always fully populated.
+@pytest.mark.parametrize(
+    ("stub_result", "expected"),
+    [
+        pytest.param(
+            SimpleNamespace(start_index=0, text="stubbed chunk text"),
+            ["stubbed chunk text"],
+            id="start_index-only",
+        ),
+        pytest.param(
+            SimpleNamespace(end_index=5, text="stubbed chunk text"),
+            ["stubbed chunk text"],
+            id="end_index-only",
+        ),
+        pytest.param(
+            SimpleNamespace(
+                start_index=0,
+                end_index=len("irrelevant input"),
+                text="stubbed chunk text",
+            ),
+            ["irrelevant input"],
+            id="both-present-takes-overlap-branch",
+        ),
+    ],
+)
+def test_recursive_chunker_index_fallback(monkeypatch, stub_result, expected):
+    # Stub chunk results mirror Chonkie result shapes the code must not
+    # assume are always fully populated: start-only and end-only fall back
+    # to the plain chunk text, while a fully-populated stub must still take
+    # the overlap-extension branch (a negative control against a future
+    # change that makes that branch permanently unreachable).
     chunker = ChonkieChunker(strategy="recursive", chunk_size=20, chunk_overlap=5)
-    stub_result = SimpleNamespace(start_index=0, text="stubbed chunk text")
     monkeypatch.setattr(chunker, "_chunker", SimpleNamespace(chunk=lambda text: [stub_result]))
 
-    assert chunker.chunk("irrelevant input") == ["stubbed chunk text"]
+    text = "irrelevant input"
+    assert chunker.chunk(text) == expected
+
+
+def test_recursive_chunker_warns_once_per_call_on_missing_index(monkeypatch, caplog):
+    # A malformed result set (many items missing an index) must log exactly
+    # one warning per chunk() call, not one per item, or it floods the log.
+    chunker = ChonkieChunker(strategy="recursive", chunk_size=20, chunk_overlap=5)
+    stub_results = [SimpleNamespace(start_index=0, text=f"chunk {i}") for i in range(5)]
+    monkeypatch.setattr(chunker, "_chunker", SimpleNamespace(chunk=lambda text: stub_results))
+
+    with caplog.at_level("WARNING", logger="ultralight_rag.pipeline.chunking"):
+        chunks = chunker.chunk("irrelevant input")
+
+    assert chunks == [f"chunk {i}" for i in range(5)]
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    # The warning must never carry document content.
+    for record in warnings:
+        assert "chunk 0" not in record.getMessage()
+        assert "irrelevant input" not in record.getMessage()
+
+
+def test_chunk_text_treats_non_str_text_attribute_as_missing():
+    # A duck-typed result whose .text is present but None (or any non-str)
+    # must not be silently ingested as garbage repr text passing truthiness
+    # checks; it should fall back to str(result), same as a fully absent
+    # .text attribute.
+    from ultralight_rag.pipeline.chunking import _chunk_text
+
+    class Weird:
+        text = None
+
+        def __str__(self) -> str:
+            return "weird repr"
+
+    assert _chunk_text(Weird()) == "weird repr"
+    assert _chunk_text(SimpleNamespace(text="plain")) == "plain"
 
 
 def test_chunker_rejects_invalid_configuration():
