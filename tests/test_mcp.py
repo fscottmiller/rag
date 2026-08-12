@@ -48,7 +48,21 @@ def test_combined_bare_import_does_not_construct_a_service():
         [
             sys.executable,
             "-c",
+            # Assert the side effect, not just the sentinel. `_default_app is
+            # None` alone passes even with the historical bug restored, because
+            # a module-scope `app = create_combined_app()` binds `app` directly
+            # and never touches the lazy singleton -- so the connection and the
+            # embedder are built while the sentinel still reads None. The
+            # sqlite3.connect spy catches the cost itself, and the vars() check
+            # catches the eager binding: __getattr__ only fires for names absent
+            # from the module dict, so `'app' not in vars(...)` is exactly the
+            # laziness invariant.
+            "import sqlite3\n"
+            "_connect, opened = sqlite3.connect, []\n"
+            "sqlite3.connect = lambda *a, **k: (opened.append(a), _connect(*a, **k))[1]\n"
             "import ultralight_rag.combined as combined\n"
+            "assert not opened, f'bare import opened a database: {opened}'\n"
+            "assert 'app' not in vars(combined), 'bare import bound app eagerly'\n"
             "assert combined._default_app is None, 'bare import realized the lazy app'\n",
         ],
         capture_output=True,

@@ -42,7 +42,12 @@ def create_combined_app(service: RAGService | None = None) -> FastAPI:
     # tests, across other app instances, ...) after this app shuts down, so
     # closing its store out from under them would be a surprise, not a favor.
     owns_store = service is None
-    rag = service or RAGService()
+    # `service if service is not None` rather than `service or`: ownership is
+    # decided by identity just above, so construction must test the same thing.
+    # RAGService defines neither __bool__ nor __len__, so the two agree today --
+    # but if that ever changed, `or` would build a fresh service for a falsy
+    # injected one while owns_store stayed False, leaking that store silently.
+    rag = service if service is not None else RAGService()
     mcp_path = os.getenv("MCP_PATH", "/mcp")
     mcp = create_mcp(
         rag,
