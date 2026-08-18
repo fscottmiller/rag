@@ -234,7 +234,9 @@ class SQLiteStore:
     @_synchronized
     def get_document(self, document_id: str) -> dict[str, Any]:
         row = self.connection.execute(
-            "SELECT * FROM documents WHERE id = ?", (document_id,)
+            "SELECT d.*, (SELECT COUNT(id) FROM chunks WHERE document_id = d.id) AS chunk_count "
+            "FROM documents d WHERE id = ?",
+            (document_id,),
         ).fetchone()
         if row is None:
             raise DocumentNotFoundError(document_id)
@@ -260,15 +262,8 @@ class SQLiteStore:
             "metadata": self._decode_metadata(row["metadata"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "chunk_count": row["chunk_count"]
-            if "chunk_count" in row.keys()
-            else self._chunk_count(row["id"]),
+            "chunk_count": row["chunk_count"],
         }
-
-    def _chunk_count(self, document_id: str) -> int:
-        return self.connection.execute(
-            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (document_id,)
-        ).fetchone()[0]
 
     def _chunk_count_all(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
