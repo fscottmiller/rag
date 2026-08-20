@@ -133,8 +133,7 @@ class SQLiteStore:
         if self.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]:
             raise ValueError("Cannot replace embedding identity while vector data remains")
         self.connection.executescript(
-            "DROP TRIGGER IF EXISTS chunks_delete_vec;\n"
-            "DROP TABLE vec_chunks;"
+            "DROP TRIGGER IF EXISTS chunks_delete_vec;\nDROP TABLE vec_chunks;"
         )
         self._vector_dimension = None
 
