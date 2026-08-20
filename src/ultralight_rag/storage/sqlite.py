@@ -112,10 +112,12 @@ class SQLiteStore:
             return
         if self._vector_dimension is not None and self._vector_dimension != dimension:
             raise ValueError("All embeddings in one index must have the same dimension")
-        self.connection.executescript(
+        self.connection.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
             f"USING vec0(chunk_id INTEGER PRIMARY KEY, "
-            f"embedding FLOAT[{dimension}] distance_metric=cosine);\n"
+            f"embedding FLOAT[{dimension}] distance_metric=cosine)"
+        )
+        self.connection.execute(
             "CREATE TRIGGER IF NOT EXISTS chunks_delete_vec "
             "AFTER DELETE ON chunks "
             "BEGIN "
