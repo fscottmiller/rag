@@ -117,6 +117,13 @@ class SQLiteStore:
             f"USING vec0(chunk_id INTEGER PRIMARY KEY, "
             f"embedding FLOAT[{dimension}] distance_metric=cosine)"
         )
+        self.connection.execute(
+            "CREATE TRIGGER IF NOT EXISTS vec_chunks_delete_trigger "
+            "AFTER DELETE ON chunks "
+            "BEGIN "
+            "DELETE FROM vec_chunks WHERE chunk_id = old.id; "
+            "END;"
+        )
         self._vector_dimension = dimension
 
     def _drop_empty_vector_table(self) -> None:
@@ -125,6 +132,7 @@ class SQLiteStore:
             return
         if self.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]:
             raise ValueError("Cannot replace embedding identity while vector data remains")
+        self.connection.execute("DROP TRIGGER IF EXISTS vec_chunks_delete_trigger")
         self.connection.execute("DROP TABLE vec_chunks")
         self._vector_dimension = None
 
@@ -362,16 +370,6 @@ class SQLiteStore:
             self._require_embedding_configuration(expected_embedding_identity)
             if embeddings:
                 self._ensure_vector_table(len(embeddings[0]))
-            old_ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if old_ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in old_ids]
-                )
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             self.connection.execute(
                 "UPDATE documents SET title=?, content=?, metadata=?, updated_at=? WHERE id=?",
@@ -429,16 +427,6 @@ class SQLiteStore:
             ):
                 raise DocumentNotFoundError(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
-            ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in ids]
-                )
             self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
 
     @_synchronized
