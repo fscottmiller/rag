@@ -238,8 +238,7 @@ class SQLiteStore:
         ).fetchone()
         if row is None:
             raise DocumentNotFoundError(document_id)
-        result = self._document_summary(row)
-        result["chunks"] = [
+        chunks = [
             {
                 "id": item["id"],
                 "ordinal": item["ordinal"],
@@ -250,8 +249,17 @@ class SQLiteStore:
                 "SELECT * FROM chunks WHERE document_id = ? ORDER BY ordinal", (document_id,)
             )
         ]
-        result["content"] = row["content"]
-        return result
+        metadata = self._decode_metadata(row["metadata"])
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "metadata": metadata,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "chunk_count": len(chunks),
+            "chunks": chunks,
+            "content": row["content"],
+        }
 
     def _document_summary(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -260,15 +268,8 @@ class SQLiteStore:
             "metadata": self._decode_metadata(row["metadata"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "chunk_count": row["chunk_count"]
-            if "chunk_count" in row.keys()
-            else self._chunk_count(row["id"]),
+            "chunk_count": row["chunk_count"],
         }
-
-    def _chunk_count(self, document_id: str) -> int:
-        return self.connection.execute(
-            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (document_id,)
-        ).fetchone()[0]
 
     def _chunk_count_all(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
