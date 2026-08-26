@@ -362,15 +362,13 @@ class SQLiteStore:
             self._require_embedding_configuration(expected_embedding_identity)
             if embeddings:
                 self._ensure_vector_table(len(embeddings[0]))
-            old_ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if old_ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in old_ids]
+            if self._vector_dimension is None:
+                self._load_vector_dimension()
+            if self._vector_dimension is not None:
+                self.connection.execute(
+                    "DELETE FROM vec_chunks WHERE chunk_id IN "
+                    "(SELECT id FROM chunks WHERE document_id = ?)",
+                    (document_id,),
                 )
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             self.connection.execute(
@@ -429,15 +427,13 @@ class SQLiteStore:
             ):
                 raise DocumentNotFoundError(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
-            ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in ids]
+            if self._vector_dimension is None:
+                self._load_vector_dimension()
+            if self._vector_dimension is not None:
+                self.connection.execute(
+                    "DELETE FROM vec_chunks WHERE chunk_id IN "
+                    "(SELECT id FROM chunks WHERE document_id = ?)",
+                    (document_id,),
                 )
             self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
 
