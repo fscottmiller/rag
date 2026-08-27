@@ -183,10 +183,15 @@ class SentenceTransformerEmbedder(BaseEmbedder):
 
 
 class FastEmbedEmbedder(BaseEmbedder):
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+    def __init__(
+        self, model_name: str = "BAAI/bge-small-en-v1.5", batch_size: int = 64
+    ) -> None:
         if not model_name.strip():
             raise ValueError("embedding model must not be empty")
+        if batch_size < 1:
+            raise ValueError("embedding batch size must be positive")
         self.model_name = model_name
+        self.batch_size = batch_size
         self._model = None
         self._model_lock = Lock()
 
@@ -205,7 +210,10 @@ class FastEmbedEmbedder(BaseEmbedder):
         if not inputs:
             return []
         try:
-            vectors = [embedding.tolist() for embedding in self.model.embed(inputs)]
+            vectors = [
+                embedding.tolist()
+                for embedding in self.model.embed(inputs, batch_size=self.batch_size)
+            ]
         except (AttributeError, TypeError, ValueError) as exc:
             # exc is raised by the local model library against `texts` -- document
             # content or the search query, both user-supplied -- so %r escapes it the
@@ -387,7 +395,7 @@ def create_embedder(
 ) -> BaseEmbedder:
     normalized = canonical_provider(provider)
     if normalized == "fastembed":
-        return FastEmbedEmbedder(model)
+        return FastEmbedEmbedder(model, embedding_batch_size)
     if normalized == "sentence-transformers":
         return SentenceTransformerEmbedder(model)
     if normalized == "ollama":

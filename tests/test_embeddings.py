@@ -53,6 +53,7 @@ def test_embedder_factory_supports_provider_aliases():
 
 def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
     constructed = []
+    batches = []
 
     class Vector:
         def tolist(self):
@@ -62,7 +63,8 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
         def __init__(self, model_name):
             constructed.append(model_name)
 
-        def embed(self, texts):
+        def embed(self, texts, batch_size):
+            batches.append(batch_size)
             return (Vector() for _ in texts)
 
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
@@ -72,6 +74,27 @@ def test_fastembed_is_lazy_and_converts_vectors(monkeypatch):
     assert constructed == []
     assert embedder.embed(["one", "two"]) == [[1.0, 2.0], [1.0, 2.0]]
     assert constructed == ["test-model"]
+    assert batches == [64]
+
+
+def test_fastembed_uses_configured_batch_size(monkeypatch):
+    batches = []
+
+    class Vector:
+        def tolist(self):
+            return [1.0]
+
+    class TextEmbedding:
+        def __init__(self, model_name):
+            pass
+
+        def embed(self, texts, batch_size):
+            batches.append(batch_size)
+            return (Vector() for _ in texts)
+
+    monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
+    assert create_embedder("fastembed", "test-model", embedding_batch_size=8).embed(["one"])
+    assert batches == [8]
 
 
 @pytest.mark.parametrize(
@@ -128,7 +151,7 @@ def test_fastembed_constructs_its_model_once_under_concurrent_first_use(monkeypa
             constructed.append(model_name)
             time.sleep(0.01)
 
-        def embed(self, texts):
+        def embed(self, texts, batch_size):
             return (Vector() for _ in texts)
 
     monkeypatch.setitem(sys.modules, "fastembed", SimpleNamespace(TextEmbedding=TextEmbedding))
