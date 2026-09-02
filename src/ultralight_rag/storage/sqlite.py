@@ -366,7 +366,8 @@ class SQLiteStore:
                 self._load_vector_dimension()
             if self._vector_dimension is not None:
                 self.connection.execute(
-                    "DELETE FROM vec_chunks WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?)",
+                    "DELETE FROM vec_chunks WHERE chunk_id IN "
+                    "(SELECT id FROM chunks WHERE document_id = ?)",
                     (document_id,),
                 )
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
@@ -430,7 +431,8 @@ class SQLiteStore:
                 self._load_vector_dimension()
             if self._vector_dimension is not None:
                 self.connection.execute(
-                    "DELETE FROM vec_chunks WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?)",
+                    "DELETE FROM vec_chunks WHERE chunk_id IN "
+                    "(SELECT id FROM chunks WHERE document_id = ?)",
                     (document_id,),
                 )
             self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
