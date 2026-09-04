@@ -235,7 +235,8 @@ class SQLiteStore:
     def get_document(self, document_id: str) -> dict[str, Any]:
         row = self.connection.execute(
             """SELECT d.*, (SELECT COUNT(id) FROM chunks WHERE document_id = d.id) AS chunk_count
-               FROM documents d WHERE d.id = ?""", (document_id,)
+               FROM documents d WHERE d.id = ?""",
+            (document_id,),
         ).fetchone()
         if row is None:
             raise DocumentNotFoundError(document_id)
