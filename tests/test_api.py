@@ -502,3 +502,53 @@ def test_rest_runtime_error_returns_500():
 
     response = client.get("/documents")
     assert response.status_code == 500
+
+
+def test_rest_embedding_provider_errors():
+    mock_service = Mock(spec=RAGService)
+    mock_service.settings = Mock()
+    mock_service.settings.max_request_bytes = 1000000
+    mock_service.settings.max_document_bytes = 1000000
+    mock_service.settings.trusted_hosts = ["*"]
+    mock_service.settings.auth_mode = "none"
+
+    app = create_app(mock_service)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    from ultralight_rag.pipeline.embeddings import (
+        EmbeddingProviderResponseError,
+        EmbeddingProviderUnavailableError,
+    )
+
+    # Ingest
+    mock_service.ingest.side_effect = EmbeddingProviderUnavailableError("unavailable")
+    response = client.post("/documents", json={"title": "T", "content": "C"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding provider is currently unavailable"
+
+    mock_service.ingest.side_effect = EmbeddingProviderResponseError("bad response")
+    response = client.post("/documents", json={"title": "T", "content": "C"})
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Embedding provider returned an invalid response"
+
+    # Update
+    mock_service.update.side_effect = EmbeddingProviderUnavailableError("unavailable")
+    response = client.put("/documents/123", json={"title": "T", "content": "C"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding provider is currently unavailable"
+
+    mock_service.update.side_effect = EmbeddingProviderResponseError("bad response")
+    response = client.put("/documents/123", json={"title": "T", "content": "C"})
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Embedding provider returned an invalid response"
+
+    # Search
+    mock_service.search.side_effect = EmbeddingProviderUnavailableError("unavailable")
+    response = client.post("/search", json={"query": "Q"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding provider is currently unavailable"
+
+    mock_service.search.side_effect = EmbeddingProviderResponseError("bad response")
+    response = client.post("/search", json={"query": "Q"})
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Embedding provider returned an invalid response"
