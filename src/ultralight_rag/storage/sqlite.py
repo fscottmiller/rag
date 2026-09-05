@@ -149,6 +149,38 @@ class SQLiteStore:
             raise ValueError("Embeddings must contain only finite numbers")
         return [float(value) for value in vector]
 
+    def _insert_chunks(
+        self, document_id: str, chunks: list[str], embeddings: list[list[float]]
+    ) -> None:
+        if not chunks:
+            return
+
+        chunk_data = [(document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)]
+        self.connection.executemany(
+            "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
+            chunk_data,
+        )
+
+        chunk_ids = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
+                (document_id,),
+            )
+        ]
+
+        # strict=True documents (and enforces) an invariant already guaranteed by
+        # _validate_embeddings above, which raises ValueError on a length mismatch
+        # before this block ever runs.
+        vec_data = [
+            (chunk_id, sqlite_vec.serialize_float32(vector))
+            for chunk_id, vector in zip(chunk_ids, embeddings, strict=True)
+        ]
+        self.connection.executemany(
+            "INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?,?)",
+            vec_data,
+        )
+
     @classmethod
     def _validate_embeddings(
         cls, chunks: list[str], embeddings: list[list[float]]
@@ -190,34 +222,7 @@ class SQLiteStore:
                     now,
                 ),
             )
-            if chunks:
-                chunk_data = [
-                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
-                ]
-                self.connection.executemany(
-                    "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
-                    chunk_data,
-                )
-
-                chunk_ids = [
-                    row[0]
-                    for row in self.connection.execute(
-                        "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
-                        (document_id,),
-                    )
-                ]
-
-                # strict=True documents (and enforces) an invariant already guaranteed by
-                # _validate_embeddings above, which raises ValueError on a length mismatch
-                # before this block ever runs.
-                vec_data = [
-                    (chunk_id, sqlite_vec.serialize_float32(vector))
-                    for chunk_id, vector in zip(chunk_ids, embeddings, strict=True)
-                ]
-                self.connection.executemany(
-                    "INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?,?)",
-                    vec_data,
-                )
+            self._insert_chunks(document_id, chunks, embeddings)
         return self.get_document(document_id)
 
     @_synchronized
@@ -383,34 +388,7 @@ class SQLiteStore:
                     document_id,
                 ),
             )
-            if chunks:
-                chunk_data = [
-                    (document_id, ordinal, text, "{}") for ordinal, text in enumerate(chunks)
-                ]
-                self.connection.executemany(
-                    "INSERT INTO chunks (document_id,ordinal,text,metadata) VALUES (?,?,?,?)",
-                    chunk_data,
-                )
-
-                chunk_ids = [
-                    row[0]
-                    for row in self.connection.execute(
-                        "SELECT id FROM chunks WHERE document_id = ? ORDER BY ordinal",
-                        (document_id,),
-                    )
-                ]
-
-                # strict=True documents (and enforces) an invariant already guaranteed by
-                # _validate_embeddings above, which raises ValueError on a length mismatch
-                # before this block ever runs.
-                vec_data = [
-                    (chunk_id, sqlite_vec.serialize_float32(vector))
-                    for chunk_id, vector in zip(chunk_ids, embeddings, strict=True)
-                ]
-                self.connection.executemany(
-                    "INSERT INTO vec_chunks (chunk_id,embedding) VALUES (?,?)",
-                    vec_data,
-                )
+            self._insert_chunks(document_id, chunks, embeddings)
         return self.get_document(document_id)
 
     @_synchronized
