@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
@@ -123,6 +124,13 @@ def create_app(
     authorizer = Authorizer(rag.settings)
     app = FastAPI(title="Ultralight RAG MCP", version="0.1.0", lifespan=lifespan)
     app.state.rag = rag
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(rag.settings.cors_origins),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=rag.settings.max_request_bytes)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(rag.settings.trusted_hosts))
 

@@ -69,6 +69,7 @@ class Settings:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     embedding_batch_size: int = 64
     trusted_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
+    cors_origins: tuple[str, ...] = ("*",)
 
     def __post_init__(self) -> None:
         if self.max_document_bytes < 1:
@@ -81,6 +82,8 @@ class Settings:
             raise ValueError("embedding_batch_size must be positive")
         if not self.trusted_hosts or any(not host.strip() for host in self.trusted_hosts):
             raise ValueError("trusted_hosts must contain at least one non-empty host")
+        if not self.cors_origins or any(not origin.strip() for origin in self.cors_origins):
+            raise ValueError("cors_origins must contain at least one non-empty origin")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -141,5 +144,10 @@ class Settings:
                     ","
                 )
                 if host.strip()
+            ),
+            cors_origins=tuple(
+                origin.strip()
+                for origin in os.getenv("RAG_CORS_ORIGINS", "*").split(",")
+                if origin.strip()
             ),
         )
