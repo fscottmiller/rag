@@ -463,6 +463,8 @@ class SQLiteStore:
         result = []
         seen_ids = set()
 
+        document_metadata_cache = {}
+
         while True:
             cursor = self.connection.execute(
                 """SELECT c.id, c.document_id, c.ordinal, c.text, c.metadata,
@@ -481,7 +483,13 @@ class SQLiteStore:
                     continue
                 seen_ids.add(chunk_id)
 
-                metadata = self._decode_metadata(row["document_metadata"])
+                document_id = row["document_id"]
+                if document_id not in document_metadata_cache:
+                    document_metadata_cache[document_id] = self._decode_metadata(
+                        row["document_metadata"]
+                    )
+                metadata = document_metadata_cache[document_id]
+
                 if filter_metadata and any(
                     key not in metadata or metadata[key] != value
                     for key, value in filter_metadata.items()
