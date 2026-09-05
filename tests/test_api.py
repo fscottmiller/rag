@@ -488,11 +488,31 @@ def test_trusted_proxy_roles_control_document_mutations(service):
     assert client.delete(f"/documents/{document_id}", headers=admin_headers).status_code == 204
 
 
+def test_cors_middleware():
+    mock_service = Mock(spec=RAGService)
+    mock_service.settings = Mock()
+    mock_service.settings.max_request_bytes = 1000000
+    mock_service.settings.trusted_hosts = ["*"]
+    mock_service.settings.cors_origins = ["*"]
+    mock_service.settings.auth_mode = "none"
+
+    app = create_app(mock_service)
+    client = TestClient(app)
+
+    response = client.options(
+        "/documents",
+        headers={"Origin": "http://localhost", "Access-Control-Request-Method": "POST"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "*"
+
+
 def test_rest_runtime_error_returns_500():
     mock_service = Mock(spec=RAGService)
     mock_service.settings = Mock()
     mock_service.settings.max_request_bytes = 1000000
     mock_service.settings.trusted_hosts = ["*"]
+    mock_service.settings.cors_origins = ["*"]
     mock_service.settings.auth_mode = "none"
 
     mock_service.list_documents.side_effect = RuntimeError("Something went wrong")
