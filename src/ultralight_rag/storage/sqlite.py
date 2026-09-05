@@ -261,7 +261,9 @@ class SQLiteStore:
             "metadata": self._decode_metadata(row["metadata"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "chunk_count": chunk_count if chunk_count is not None else (
+            "chunk_count": chunk_count
+            if chunk_count is not None
+            else (
                 row["chunk_count"] if "chunk_count" in row.keys() else self._chunk_count(row["id"])
             ),
         }
