@@ -238,8 +238,7 @@ class SQLiteStore:
         ).fetchone()
         if row is None:
             raise DocumentNotFoundError(document_id)
-        result = self._document_summary(row)
-        result["chunks"] = [
+        chunks = [
             {
                 "id": item["id"],
                 "ordinal": item["ordinal"],
@@ -250,19 +249,21 @@ class SQLiteStore:
                 "SELECT * FROM chunks WHERE document_id = ? ORDER BY ordinal", (document_id,)
             )
         ]
+        result = self._document_summary(row, chunk_count=len(chunks))
+        result["chunks"] = chunks
         result["content"] = row["content"]
         return result
 
-    def _document_summary(self, row: sqlite3.Row) -> dict[str, Any]:
+    def _document_summary(self, row: sqlite3.Row, chunk_count: int | None = None) -> dict[str, Any]:
         return {
             "id": row["id"],
             "title": row["title"],
             "metadata": self._decode_metadata(row["metadata"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "chunk_count": row["chunk_count"]
-            if "chunk_count" in row.keys()
-            else self._chunk_count(row["id"]),
+            "chunk_count": chunk_count if chunk_count is not None else (
+                row["chunk_count"] if "chunk_count" in row.keys() else self._chunk_count(row["id"])
+            ),
         }
 
     def _chunk_count(self, document_id: str) -> int:
