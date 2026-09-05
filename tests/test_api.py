@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from ultralight_rag.api.main import BodySizeLimitMiddleware, create_app
 from ultralight_rag.config import Settings
 from ultralight_rag.service import RAGService
-from ultralight_rag.storage.sqlite import SQLiteStore
+from ultralight_rag.storage.sqlite import DocumentNotFoundError, SQLiteStore
 
 
 def test_rest_lifecycle(service):
@@ -502,3 +502,23 @@ def test_rest_runtime_error_returns_500():
 
     response = client.get("/documents")
     assert response.status_code == 500
+
+
+def test_rest_document_not_found_handling(service):
+    service.get_document = Mock(side_effect=DocumentNotFoundError("missing-id"))
+    service.update = Mock(side_effect=DocumentNotFoundError("missing-id"))
+    service.delete_document = Mock(side_effect=DocumentNotFoundError("missing-id"))
+
+    client = TestClient(create_app(service))
+
+    response_get = client.get("/documents/missing-id")
+    assert response_get.status_code == 404
+    assert response_get.json()["detail"] == "Document not found"
+
+    response_put = client.put("/documents/missing-id", json={"title": "test", "content": "test"})
+    assert response_put.status_code == 404
+    assert response_put.json()["detail"] == "Document not found"
+
+    response_delete = client.delete("/documents/missing-id")
+    assert response_delete.status_code == 404
+    assert response_delete.json()["detail"] == "Document not found"
