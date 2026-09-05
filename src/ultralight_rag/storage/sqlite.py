@@ -341,6 +341,15 @@ class SQLiteStore:
         """Reject stale embedding identities before provider work begins."""
         self._require_embedding_configuration(expected)
 
+    def _ensure_document_exists(self, document_id: str) -> None:
+        if (
+            self.connection.execute(
+                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+            is None
+        ):
+            raise DocumentNotFoundError(document_id)
+
     @_synchronized
     def replace_document(
         self,
@@ -352,13 +361,7 @@ class SQLiteStore:
         embeddings = self._validate_embeddings(chunks, embeddings)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            if (
-                self.connection.execute(
-                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-                ).fetchone()
-                is None
-            ):
-                raise DocumentNotFoundError(document_id)
+            self._ensure_document_exists(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
             if embeddings:
                 self._ensure_vector_table(len(embeddings[0]))
@@ -421,13 +424,7 @@ class SQLiteStore:
     ) -> None:
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            if (
-                self.connection.execute(
-                    "SELECT 1 FROM documents WHERE id = ?", (document_id,)
-                ).fetchone()
-                is None
-            ):
-                raise DocumentNotFoundError(document_id)
+            self._ensure_document_exists(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
             ids = [
                 row[0]
