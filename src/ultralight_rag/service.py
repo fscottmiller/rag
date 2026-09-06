@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from .config import Settings
 from .pipeline.chunking import BaseChunker, ChonkieChunker
@@ -37,8 +37,8 @@ class RAGService:
             if embedder is not None
             else create_embedder(
                 self.settings.embedding_provider,
-                self.settings.embedding_model,
-                self.settings.embedding_url,
+                cast(str, self.settings.embedding_model),
+                cast(str, self.settings.embedding_url),
                 self.settings.embedding_api_key,
                 self.settings.embedding_timeout,
                 self.settings.embedding_dimensions,

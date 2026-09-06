@@ -1,5 +1,6 @@
 import pytest
 
+from ultralight_rag.config import Settings
 from ultralight_rag.pipeline.chunking import BaseChunker
 from ultralight_rag.pipeline.embeddings import BaseEmbedder
 from ultralight_rag.service import RAGService
@@ -66,4 +67,9 @@ def _close_sqlite_stores_opened_during_test(monkeypatch):
 
 @pytest.fixture
 def service():
-    return RAGService(SQLiteStore(), KeywordEmbedder(), FixedChunker())
+    return RAGService(
+        SQLiteStore(),
+        KeywordEmbedder(),
+        FixedChunker(),
+        Settings(trusted_hosts=("localhost", "127.0.0.1", "testserver")),
+    )

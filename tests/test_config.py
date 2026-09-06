@@ -14,7 +14,32 @@ def test_settings_defaults_are_in_memory_and_fastembed():
     assert settings.max_document_bytes == 10 * 1024 * 1024
     assert settings.max_request_bytes == 10 * 1024 * 1024 + 64 * 1024
     assert settings.embedding_batch_size == 64
-    assert settings.trusted_hosts == ("localhost", "127.0.0.1", "testserver")
+    assert settings.trusted_hosts == ("localhost", "127.0.0.1")
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "url"),
+    [
+        ("fastembed", "BAAI/bge-small-en-v1.5", "https://api.openai.com/v1/embeddings"),
+        ("sentence-transformers", "all-MiniLM-L6-v2", "https://api.openai.com/v1/embeddings"),
+        ("ollama", "nomic-embed-text", "http://localhost:11434/v1/embeddings"),
+        ("openai", "text-embedding-3-small", "https://api.openai.com/v1/embeddings"),
+        (
+            "openai-compatible-api",
+            "text-embedding-3-small",
+            "https://api.openai.com/v1/embeddings",
+        ),
+        ("sentence-transformer", "all-MiniLM-L6-v2", "https://api.openai.com/v1/embeddings"),
+    ],
+)
+def test_direct_settings_resolve_provider_defaults(provider, model, url):
+    settings = Settings(embedding_provider=provider)
+    assert settings.embedding_model == model
+    assert settings.embedding_url == url
+
+
+def test_testserver_is_not_a_production_trusted_host_default():
+    assert "testserver" not in Settings().trusted_hosts
 
 
 def test_settings_read_all_environment_values(monkeypatch):
@@ -124,6 +149,11 @@ def test_unset_embedding_provider_without_api_key_uses_fastembed(monkeypatch):
     settings = Settings.from_env()
     assert settings.embedding_provider == "fastembed"
     assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
+
+
+def test_from_env_does_not_allow_testserver_by_default(monkeypatch):
+    monkeypatch.delenv("RAG_TRUSTED_HOSTS", raising=False)
+    assert Settings.from_env().trusted_hosts == ("localhost", "127.0.0.1")
 
 
 def test_settings_reject_invalid_limits_and_hosts():
