@@ -110,7 +110,10 @@ def test_rest_rejects_malformed_origin(service, origin):
 
 def test_rest_rejects_documents_over_configured_limit(service):
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=8, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
 
@@ -141,7 +144,10 @@ def _post_document_at_boundary(client, path, content):
 def test_rest_accepts_document_content_at_exact_byte_limit(service, path):
     limit = 8
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     content = "x" * limit
@@ -155,7 +161,10 @@ def test_rest_accepts_document_content_at_exact_byte_limit(service, path):
 def test_rest_rejects_document_content_one_byte_over_limit(service, path):
     limit = 8
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     content = "x" * (limit + 1)
@@ -171,7 +180,10 @@ def test_rest_rejects_multibyte_content_by_utf8_byte_length_not_char_length(serv
     # 3; only a correct byte-length check rejects it with 413.
     limit = 3
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     content = "éé"
@@ -185,7 +197,10 @@ def test_rest_rejects_multibyte_content_by_utf8_byte_length_not_char_length(serv
 def test_rest_put_accepts_and_rejects_document_content_at_exact_byte_limit(service):
     limit = 8
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     created = client.post("/documents", json={"title": "Seed", "content": "seed"})
@@ -254,7 +269,10 @@ def _put_document_at_boundary(client, document_id, path, content):
 def test_rest_put_accepts_document_content_at_exact_byte_limit_all_content_types(service, path):
     limit = 8
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     created = client.post("/documents", json={"title": "Seed", "content": "seedling"})
@@ -270,7 +288,10 @@ def test_rest_put_accepts_document_content_at_exact_byte_limit_all_content_types
 def test_rest_put_rejects_document_content_one_byte_over_limit_all_content_types(service, path):
     limit = 8
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=limit)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=limit, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
     created = client.post("/documents", json={"title": "Seed", "content": "seedling"})
@@ -307,7 +328,11 @@ def test_rest_rejects_large_request_before_parsing(service):
         SQLiteStore(),
         service.embedder,
         service.chunker,
-        Settings(max_document_bytes=8, max_request_bytes=32),
+        Settings(
+            max_document_bytes=8,
+            max_request_bytes=32,
+            trusted_hosts=service.settings.trusted_hosts,
+        ),
     )
     client = TestClient(create_app(limited))
     response = client.post(
@@ -363,7 +388,10 @@ async def test_body_size_limit_rejects_invalid_content_length():
 
 def test_rest_rejects_large_file_upload(service):
     limited = RAGService(
-        SQLiteStore(), service.embedder, service.chunker, Settings(max_document_bytes=8)
+        SQLiteStore(),
+        service.embedder,
+        service.chunker,
+        Settings(max_document_bytes=8, trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(limited))
 
@@ -442,7 +470,7 @@ def test_trusted_proxy_roles_control_document_mutations(service):
         SQLiteStore(),
         service.embedder,
         service.chunker,
-        Settings(auth_mode="trusted-proxy"),
+        Settings(auth_mode="trusted-proxy", trusted_hosts=service.settings.trusted_hosts),
     )
     client = TestClient(create_app(protected_service))
     reader_headers = {

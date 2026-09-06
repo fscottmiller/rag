@@ -162,7 +162,7 @@ These variables define the configuration of the current index, not per-document 
 | `RAG_CHUNK_OVERLAP` | `64` | Overlap between chunks; recursive chunking prepends the prior chunk's trailing characters. |
 | `RAG_MAX_DOCUMENT_BYTES` | `10485760` | Maximum document content size accepted by REST after parsing. |
 | `RAG_MAX_REQUEST_BYTES` | `10551296` | Maximum raw HTTP request body accepted before parsing; keep this at or above the document limit to allow request overhead. |
-| `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
+| `RAG_TRUSTED_HOSTS` | `localhost,127.0.0.1` | Comma-separated host allowlist for REST requests; configure the public host when deploying behind a proxy. |
 | `RAG_EMBEDDING_BATCH_SIZE` | `64` | Maximum number of chunks sent to an embedding provider per request. |
 | `MCP_TRANSPORT` | `stdio` | Select `stdio` or `streamable-http`. Only used by the standalone `ultralight_rag.mcp_server.server` process, not the combined app. |
 | `MCP_HOST` | `127.0.0.1` | Bind host for the standalone MCP server. Ignored by the combined app, which binds to uvicorn's `--host` instead. |
