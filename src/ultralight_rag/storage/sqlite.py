@@ -123,7 +123,7 @@ class SQLiteStore:
         self._load_vector_dimension()
         if self._vector_dimension is None:
             return
-        if self.connection.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]:
+        if self.connection.execute("SELECT 1 FROM vec_chunks LIMIT 1").fetchone() is not None:
             raise ValueError("Cannot replace embedding identity while vector data remains")
         self.connection.execute("DROP TABLE vec_chunks")
         self._vector_dimension = None
@@ -362,15 +362,13 @@ class SQLiteStore:
             self._require_embedding_configuration(expected_embedding_identity)
             if embeddings:
                 self._ensure_vector_table(len(embeddings[0]))
-            old_ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if old_ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in old_ids]
+            if self._vector_dimension is not None:
+                self.connection.execute(
+                    (
+                        "DELETE FROM vec_chunks WHERE chunk_id IN "
+                        "(SELECT id FROM chunks WHERE document_id = ?)"
+                    ),
+                    (document_id,),
                 )
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             self.connection.execute(
@@ -429,15 +427,13 @@ class SQLiteStore:
             ):
                 raise DocumentNotFoundError(document_id)
             self._require_embedding_configuration(expected_embedding_identity)
-            ids = [
-                row[0]
-                for row in self.connection.execute(
-                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-                )
-            ]
-            if ids:
-                self.connection.executemany(
-                    "DELETE FROM vec_chunks WHERE chunk_id = ?", [(item,) for item in ids]
+            if self._vector_dimension is not None:
+                self.connection.execute(
+                    (
+                        "DELETE FROM vec_chunks WHERE chunk_id IN "
+                        "(SELECT id FROM chunks WHERE document_id = ?)"
+                    ),
+                    (document_id,),
                 )
             self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
 
